@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, LayoutDashboard, FileText, History, AlertOctagon, 
   Terminal, Settings, Upload, Activity, Server, Globe, 
-  FileAudio, RefreshCw, Layers, ChevronRight, Play, AlertTriangle, Search, X
+  FileAudio, RefreshCw, Layers, ChevronRight, Play, AlertTriangle, Search, X,
+  PhoneCall
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import LiveCallDetector from './LiveCallDetector';
 
 const renderVisualEvidence = (isLoading, result) => {
   if (isLoading) {
@@ -726,6 +728,7 @@ export default function App() {
             {[
               { name: 'Dashboard', icon: LayoutDashboard },
               { name: 'Call Analysis', icon: Activity },
+              { name: 'Live Call Detector', icon: PhoneCall },
               { name: 'Web & QR Scan', icon: Globe },
               { name: 'Protection', icon: Shield },
               { name: 'History', icon: History },
@@ -806,6 +809,19 @@ export default function App() {
         {/* CONTENT AREA */}
         <main className="content-area">
           
+          {/* Live Call Detector View */}
+          {activeNav === 'Live Call Detector' && (
+            <>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">LIVE_CALL_DETECTOR</h1>
+                  <p className="page-subtitle">Real-time speech transcription and social engineering scam detection.</p>
+                </div>
+              </div>
+              <LiveCallDetector />
+            </>
+          )}
+
           {/* Agent 1 View (Call Analysis) */}
           {activeNav === 'Call Analysis' && (
             <>

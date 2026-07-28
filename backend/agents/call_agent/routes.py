@@ -383,3 +383,160 @@ async def api_check_website_blocked_query(domain: str):
     except Exception as err:
         logger.error(f"Failed to check website query status in call agent: {err}")
         return {"blocked": False}
+
+
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+import time
+
+@router.websocket("/api/live-call/ws")
+async def live_call_websocket(websocket: WebSocket):
+    await websocket.accept()
+    logger.info("Live Call Detector WebSocket connection established.")
+    
+    # Create a unique temp file to hold incoming audio chunks
+    temp_dir = tempfile.gettempdir()
+    temp_filename = f"live_{uuid.uuid4().hex}.webm"
+    temp_path = os.path.join(temp_dir, temp_filename)
+    
+    # Open / initialize empty file
+    with open(temp_path, "wb") as f:
+        pass
+        
+    running_transcript = ""
+    last_analysis_time = 0.0
+    
+    try:
+        while True:
+            # Receive either binary audio data or control text messages
+            message = await websocket.receive()
+            
+            if "bytes" in message:
+                audio_data = message["bytes"]
+                if len(audio_data) > 0:
+                    # Append audio chunk to temp file
+                    with open(temp_path, "ab") as f:
+                        f.write(audio_data)
+                    
+                    # Run STT transcription in a thread pool to avoid blocking ASGI loop
+                    try:
+                        loop = asyncio.get_event_loop()
+                        # Run transcribe_audio in the default executor
+                        stt_res = await loop.run_in_executor(
+                            None, transcribe_audio, temp_path
+                        )
+                        new_transcript = stt_res.get("transcript", "").strip()
+                        
+                        if new_transcript and new_transcript != running_transcript:
+                            running_transcript = new_transcript
+                            # Send live transcript update to client
+                            await websocket.send_json({
+                                "type": "transcript",
+                                "text": running_transcript
+                            })
+                            
+                            # Run AI Scam analysis, throttled to every 5 seconds
+                            current_time = time.time()
+                            if current_time - last_analysis_time >= 5.0:
+                                last_analysis_time = current_time
+                                # Perform forensic scanning
+                                ai_res = await run_live_scam_analysis(running_transcript)
+                                
+                                # Send risk reports updates back to client
+                                await websocket.send_json({
+                                    "type": "analysis",
+                                    "data": ai_res
+                                })
+                                
+                                # Save threat assessment details to MongoDB Atlas
+                                try:
+                                    save_live_analysis_to_db(running_transcript, ai_res)
+                                except Exception as db_err:
+                                    logger.warning(f"Failed to save live scan to DB: {db_err}")
+                                    
+                    except Exception as stt_err:
+                        logger.error(f"Error in STT live transcription: {stt_err}")
+                        
+            elif "text" in message:
+                text_msg = message["text"]
+                if text_msg == "STOP":
+                    logger.info("Received stop command from client.")
+                    break
+                    
+    except WebSocketDisconnect:
+        logger.info("Live Call Detector WebSocket disconnected.")
+    except Exception as e:
+        logger.error(f"Live WebSocket connection exception: {e}")
+    finally:
+        # Clean up the temporary audio file
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                logger.info(f"Cleaned up live session audio file: {temp_path}")
+            except Exception as clean_err:
+                logger.error(f"Failed to delete live audio file: {clean_err}")
+
+
+async def run_live_scam_analysis(transcript: str) -> dict:
+    """Executes call agent keywords, entities, emotions and LLM forensic reasoning on transcript."""
+    keywords = detect_keywords(transcript)
+    entities_dict = extract_entities(transcript)
+    emotions = analyze_emotions(transcript)
+    
+    # Run LLM reasoning in a thread pool to keep endpoints responsive
+    loop = asyncio.get_event_loop()
+    ai_reasoning = await loop.run_in_executor(
+        None,
+        lambda: run_llm_reasoning(
+            transcript=transcript,
+            speaker_count=2,
+            duration=30,
+            language="English",
+            entities=entities_dict,
+            emotions=emotions,
+            detected_keywords=keywords
+        )
+    )
+    
+    decision = ai_reasoning.get("final_decision") or "MONITOR"
+    # Match required risk score levels
+    if decision == "SCAM CONFIRMED":
+        risk_score = 95
+        recommendation = "HANG UP IMMEDIATELY"
+    elif decision == "HIGH RISK":
+        risk_score = 82
+        recommendation = "Do Not Share OTP / Credentials"
+    elif decision == "SUSPICIOUS":
+        risk_score = 55
+        recommendation = "Verify Caller Identity"
+    elif decision == "MONITOR":
+        risk_score = 35
+        recommendation = "Be Cautious"
+    else:
+        risk_score = 10
+        recommendation = "No Threat Detected"
+        
+    return {
+        "risk_score": risk_score,
+        "confidence": ai_reasoning.get("confidence_rating") or "HIGH",
+        "category": ai_reasoning.get("threat_category") or "General Conversation",
+        "reasoning": ai_reasoning.get("summary") or "Conversation monitored for scam behavior.",
+        "recommendation": recommendation
+    }
+
+
+def save_live_analysis_to_db(transcript: str, ai_res: dict) -> None:
+    """Stores live analysis details to the new MongoDB collection live_call_analysis."""
+    from database import get_db
+    db = get_db()
+    if db is not None:
+        collection = db["live_call_analysis"]
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        collection.insert_one({
+            "timestamp": timestamp,
+            "transcript": transcript,
+            "risk_score": ai_res["risk_score"],
+            "category": ai_res["category"],
+            "confidence": ai_res["confidence"],
+            "recommendation": ai_res["recommendation"]
+        })
