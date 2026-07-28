@@ -1954,12 +1954,14 @@ export default function App() {
                         boxShadow: `0 0 8px ${getRiskColor(webResult.risk_score)}20`,
                         textTransform: 'uppercase',
                         fontWeight: 'bold',
-                        padding: '6px 14px',
-                        cursor: 'default'
+                        padding: '6px 20px',
+                        cursor: 'default',
+                        width: 'auto',
+                        minWidth: '120px'
                       }}>
                         {webResult.ai_reasoning.recommended_action}
                       </button>
-                      <button onClick={() => setWebResult(null)} className="btn-primary" style={{ maxWidth: '140px' }}>
+                      <button onClick={() => setWebResult(null)} className="btn-primary" style={{ width: 'auto', minWidth: '120px', padding: '6px 20px' }}>
                         NEW SCAN
                       </button>
                     </div>

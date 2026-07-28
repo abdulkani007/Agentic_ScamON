@@ -1,4 +1,43 @@
 {
-  "blocklist": [],
-  "history": []
+  "blocklist": [
+    {
+      "domain": "youtube.com",
+      "blocked": false,
+      "unblocked": true,
+      "blocked_time": "2026-07-28 20:46:54 UTC",
+      "unblocked_time": "2026-07-28 20:47:45 UTC",
+      "blocked_by": "Website Investigation Agent",
+      "reason": "User manual unblock"
+    }
+  ],
+  "history": [
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 20:47:46 UTC",
+      "success": true,
+      "details": "Successfully unblocked."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 20:46:54 UTC",
+      "success": true,
+      "details": "SAFE"
+    },
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 20:46:25 UTC",
+      "success": true,
+      "details": "Successfully unblocked."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 20:46:10 UTC",
+      "success": true,
+      "details": "SAFE"
+    }
+  ]
 }
