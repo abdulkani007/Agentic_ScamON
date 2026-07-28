@@ -88,7 +88,7 @@ export default function LiveCallDetector() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Initialize WebSocket connection to Call Agent port 8000
-      const wsUrl = `ws://${window.location.hostname}:8000/api/live-call/ws`;
+      const wsUrl = `ws://127.0.0.1:8000/api/live-call/ws`;
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
