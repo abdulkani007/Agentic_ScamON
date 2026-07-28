@@ -1,0 +1,739 @@
+{
+  "blocklist": [
+    {
+      "domain": "phish-test.click",
+      "blocked": false,
+      "unblocked": true,
+      "blocked_time": "2026-07-28 18:44:57 UTC",
+      "unblocked_time": "2026-07-28 18:44:59 UTC",
+      "blocked_by": "Website Protection Agent",
+      "reason": "User manual unblock"
+    },
+    {
+      "domain": "youtube.com",
+      "blocked": false,
+      "unblocked": true,
+      "blocked_time": "2026-07-28 18:54:29 UTC",
+      "unblocked_time": "2026-07-28 18:54:52 UTC",
+      "blocked_by": "Website Protection Agent",
+      "reason": "User manual unblock"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "blocked": true,
+      "unblocked": false,
+      "blocked_time": "2026-07-28 18:45:16 UTC",
+      "unblocked_time": null,
+      "blocked_by": "Website Investigation Agent",
+      "reason": "Phishing detection"
+    },
+    {
+      "domain": "testunblock.com",
+      "blocked": false,
+      "unblocked": true,
+      "blocked_time": "2026-07-28 18:45:17 UTC",
+      "unblocked_time": "2026-07-28 18:45:17 UTC",
+      "blocked_by": "Website Investigation Agent",
+      "reason": "User manual unblock"
+    },
+    {
+      "domain": "testlist.com",
+      "blocked": true,
+      "unblocked": false,
+      "blocked_time": "2026-07-28 18:45:18 UTC",
+      "unblocked_time": null,
+      "blocked_by": "Website Investigation Agent",
+      "reason": "Malware detection"
+    },
+    {
+      "domain": "testprescan.com",
+      "blocked": true,
+      "unblocked": false,
+      "blocked_time": "2026-07-28 18:45:19 UTC",
+      "unblocked_time": null,
+      "blocked_by": "Website Investigation Agent",
+      "reason": "Phishing threat"
+    }
+  ],
+  "history": [
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:54:52 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:54:30 UTC",
+      "success": false,
+      "details": "SAFE"
+    },
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:51:11 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:50:34 UTC",
+      "success": false,
+      "details": "SAFE"
+    },
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:49:57 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:47:05 UTC",
+      "success": false,
+      "details": "SAFE"
+    },
+    {
+      "domain": "testprescan.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:45:20 UTC",
+      "success": false,
+      "details": "Phishing threat"
+    },
+    {
+      "domain": "testlist.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:45:18 UTC",
+      "success": false,
+      "details": "Malware detection"
+    },
+    {
+      "domain": "testunblock.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:45:18 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "testunblock.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:45:17 UTC",
+      "success": false,
+      "details": "Malware detection"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:45:17 UTC",
+      "success": false,
+      "details": "Phishing detection"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:45:14 UTC",
+      "success": false,
+      "details": "Phishing detection"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:44:59 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 18:44:59 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:44:56 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "testprescan.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:44:36 UTC",
+      "success": false,
+      "details": "Phishing threat"
+    },
+    {
+      "domain": "testlist.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:44:35 UTC",
+      "success": false,
+      "details": "Malware detection"
+    },
+    {
+      "domain": "testunblock.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:44:35 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "testunblock.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:44:34 UTC",
+      "success": false,
+      "details": "Malware detection"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:44:34 UTC",
+      "success": false,
+      "details": "Phishing detection"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:44:33 UTC",
+      "success": false,
+      "details": "Phishing detection"
+    },
+    {
+      "domain": "testprescan.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:43:49 UTC",
+      "success": false,
+      "details": "Phishing threat"
+    },
+    {
+      "domain": "testlist.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:43:47 UTC",
+      "success": false,
+      "details": "Malware detection"
+    },
+    {
+      "domain": "testunblock.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:43:43 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "testunblock.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:43:41 UTC",
+      "success": false,
+      "details": "Malware detection"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:43:39 UTC",
+      "success": false,
+      "details": "Phishing detection"
+    },
+    {
+      "domain": "testblockedsite.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:43:37 UTC",
+      "success": false,
+      "details": "Phishing detection"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:42:55 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 18:42:54 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:42:54 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:31:58 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 18:31:38 UTC",
+      "success": false,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:15:53 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 18:15:53 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:15:52 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 18:09:41 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 18:09:41 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 17:59:24 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 17:59:17 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 17:59:09 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 17:54:40 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 17:54:35 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 17:54:32 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:56:42 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 15:56:41 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:56:41 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:46:16 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 15:46:15 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:46:15 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:29:38 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 15:29:16 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:29:00 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:18:34 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 15:18:12 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:17:56 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 15:09:17 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 15:09:01 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:54:05 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "youtube.com",
+      "action": "block",
+      "timestamp": "2026-07-28 14:53:19 UTC",
+      "success": false,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:50:51 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 14:50:51 UTC",
+      "success": true,
+      "details": "HIGH RISK website scan classification"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:50:51 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "paytm-kyc-update.site",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:42:25 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "paytm-kyc-update.site",
+      "action": "block",
+      "timestamp": "2026-07-28 14:42:10 UTC",
+      "success": false,
+      "details": "DB updated. Hosts failed: Permission Denied: Administrator privileges required to edit hosts file ([Errno 13] Permission denied: 'C:\\\\Windows\\\\System32\\\\drivers\\\\etc\\\\hosts')"
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:38:21 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 14:38:21 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:38:21 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:32:47 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 14:32:47 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:32:46 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:32:15 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 14:32:15 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:32:15 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:16:36 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 14:16:36 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 14:16:36 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:59:09 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:59:09 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:59:09 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:57:35 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:57:35 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:57:35 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:55:57 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:55:57 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:55:57 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:55:43 UTC",
+      "success": false,
+      "details": "DB updated. Hosts failed: Verification Failed: Block entries not registered in hosts file."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:55:43 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:52:59 UTC",
+      "success": false,
+      "details": "DB updated. Hosts failed: Verification Failed: Block entries not registered in hosts file."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:52:59 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:48:20 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:48:20 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:48:20 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:46:48 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:46:48 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:46:48 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "block",
+      "timestamp": "2026-07-28 12:46:35 UTC",
+      "success": true,
+      "details": "Successfully updated hosts file and DB."
+    },
+    {
+      "domain": "phish-test.click",
+      "action": "unblock",
+      "timestamp": "2026-07-28 12:46:35 UTC",
+      "success": true,
+      "details": "Successfully removed from hosts file and DB."
+    }
+  ]
+}

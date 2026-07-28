@@ -1,0 +1,1003 @@
+import logging
+import os
+import re
+import socket
+import ssl
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+import requests
+
+from .config import settings
+from .whois_checker import lookup_whois
+from .ssl_checker import check_ssl
+from .typosquat_checker import check_typosquatting
+from .phishtank_checker import check_phishtank
+from .redirect_checker import trace_redirects
+from .metadata_extractor import extract_html_metadata
+from .screenshot_service import capture_screenshot
+
+logger = logging.getLogger(__name__)
+
+# List of common phishing keywords
+PHISHING_KEYWORDS = [
+    "login",
+    "verify",
+    "secure",
+    "update",
+    "reward",
+    "gift",
+    "bonus",
+    "account",
+    "bank",
+    "payment",
+    "wallet",
+    "offers",
+    "claim",
+    "support",
+    "signin",
+    "otp",
+    "kyc",
+    "refund",
+]
+
+# Suspicious top-level domains associated with threat vectors
+SUSPICIOUS_TLDS = {
+    "click",
+    "xyz",
+    "top",
+    "site",
+    "live",
+    "loan",
+    "gq",
+    "ml",
+    "cf",
+    "tk",
+    "work",
+    "win",
+    "bid",
+    "monster",
+    "support",
+}
+
+
+async def run_modular_investigation(url: str) -> Dict[str, Any]:
+    """Executes 16 independent forensic modules sequentially.
+
+    Ensures no single module failure crashes the pipeline, and generates
+    a structured incident record based ONLY on collected evidence.
+    """
+    logger.info(f"Starting enterprise modular SOC investigation for URL: {url}")
+    modules_results = []
+
+    # 1. URL Validation
+    url_valid = False
+    parsed = None
+    domain = ""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            url_valid = True
+            domain = parsed.netloc.split(":")[0]
+            modules_results.append(
+                {
+                    "module": "URL Validation",
+                    "status": "success",
+                    "evidence": {
+                        "scheme": parsed.scheme,
+                        "netloc": parsed.netloc,
+                        "path": parsed.path,
+                    },
+                    "error": "",
+                }
+            )
+        else:
+            modules_results.append(
+                {
+                    "module": "URL Validation",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": "Invalid URL format",
+                }
+            )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "URL Validation",
+                "status": "failed",
+                "evidence": {},
+                "error": str(err),
+            }
+        )
+
+    # If URL validation fails, we skip remaining checks
+    if not url_valid or not domain:
+        logger.warning("URL Validation failed. Skipping remaining checks.")
+        return {
+            "url": url,
+            "domain": domain,
+            "modules": modules_results,
+            "verified_evidence": {},
+            "verdict": {
+                "risk_score": 100,
+                "decision": "HIGH RISK",
+                "confidence": 99,
+                "reason": "URL format validation failed.",
+                "indicators": ["Malformed URL request string"],
+            },
+        }
+
+    # 2. DNS Resolution
+    dns_resolved = False
+    ip_addresses = []
+    try:
+        ips = socket.gethostbyname_ex(domain)
+        if ips and ips[2]:
+            dns_resolved = True
+            ip_addresses = ips[2]
+            modules_results.append(
+                {
+                    "module": "DNS Resolution",
+                    "status": "success",
+                    "evidence": {
+                        "ip_addresses": ip_addresses,
+                        "canonical_name": ips[0],
+                    },
+                    "error": "",
+                }
+            )
+        else:
+            modules_results.append(
+                {
+                    "module": "DNS Resolution",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": "DNS resolution failed",
+                }
+            )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "DNS Resolution",
+                "status": "failed",
+                "evidence": {},
+                "error": f"DNS resolution failed: {str(err)}",
+            }
+        )
+
+    # 3. WHOIS Lookup
+    try:
+        whois_res = lookup_whois(domain)
+        if whois_res.get("age_days") == -1 or whois_res.get("registrar") == "Unknown":
+            modules_results.append(
+                {
+                    "module": "WHOIS Lookup",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": "WHOIS service unavailable",
+                }
+            )
+        else:
+            modules_results.append(
+                {
+                    "module": "WHOIS Lookup",
+                    "status": "success",
+                    "evidence": whois_res,
+                    "error": "",
+                }
+            )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "WHOIS Lookup",
+                "status": "failed",
+                "evidence": {},
+                "error": "WHOIS service unavailable",
+            }
+        )
+
+    # 4. SSL Certificate Validation
+    if not dns_resolved:
+        modules_results.append(
+            {
+                "module": "SSL Certificate Validation",
+                "status": "skipped",
+                "evidence": {},
+                "error": "DNS resolution failed",
+            }
+        )
+    else:
+        try:
+            context = ssl.create_default_context()
+            try:
+                conn = context.wrap_socket(
+                    socket.socket(socket.AF_INET), server_hostname=domain
+                )
+                conn.settimeout(3.0)
+                conn.connect((domain, 443))
+                cert = conn.getpeercert()
+                conn.close()
+            except ssl.SSLCertVerificationError as ssl_err:
+                modules_results.append(
+                    {
+                        "module": "SSL Certificate Validation",
+                        "status": "failed",
+                        "evidence": {"valid": False},
+                        "error": "Certificate expired",
+                    }
+                )
+            except Exception as conn_err:
+                err_str = str(conn_err).lower()
+                if "expired" in err_str:
+                    modules_results.append(
+                        {
+                            "module": "SSL Certificate Validation",
+                            "status": "failed",
+                            "evidence": {"valid": False},
+                            "error": "Certificate expired",
+                        }
+                    )
+                else:
+                    modules_results.append(
+                        {
+                            "module": "SSL Certificate Validation",
+                            "status": "failed",
+                            "evidence": {"valid": False},
+                            "error": "Handshake failed",
+                        }
+                    )
+            if (
+                next(
+                    (
+                        m
+                        for m in modules_results
+                        if m["module"] == "SSL Certificate Validation"
+                    ),
+                    None,
+                )
+                is None
+            ):
+                ssl_res = check_ssl(domain)
+                if not ssl_res.get("valid"):
+                    modules_results.append(
+                        {
+                            "module": "SSL Certificate Validation",
+                            "status": "failed",
+                            "evidence": ssl_res,
+                            "error": "Certificate expired",
+                        }
+                    )
+                else:
+                    modules_results.append(
+                        {
+                            "module": "SSL Certificate Validation",
+                            "status": "success",
+                            "evidence": ssl_res,
+                            "error": "",
+                        }
+                    )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "SSL Certificate Validation",
+                    "status": "failed",
+                    "evidence": {"valid": False},
+                    "error": "Handshake failed",
+                }
+            )
+
+    # 5. HTTP Status Check
+    if not dns_resolved:
+        modules_results.append(
+            {
+                "module": "HTTP Status Check",
+                "status": "skipped",
+                "evidence": {},
+                "error": "DNS resolution failed",
+            }
+        )
+    else:
+        try:
+            resp = requests.get(url, timeout=5, allow_redirects=False)
+            modules_results.append(
+                {
+                    "module": "HTTP Status Check",
+                    "status": "success",
+                    "evidence": {
+                        "status_code": resp.status_code,
+                        "headers": dict(resp.headers),
+                    },
+                    "error": "",
+                }
+            )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "HTTP Status Check",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": str(err),
+                }
+            )
+
+    # 6. Redirect Analysis
+    if not dns_resolved:
+        modules_results.append(
+            {
+                "module": "Redirect Analysis",
+                "status": "skipped",
+                "evidence": {},
+                "error": "DNS resolution failed",
+            }
+        )
+    else:
+        try:
+            redir_res = trace_redirects(url)
+            modules_results.append(
+                {
+                    "module": "Redirect Analysis",
+                    "status": "success",
+                    "evidence": redir_res,
+                    "error": "",
+                }
+            )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "Redirect Analysis",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": str(err),
+                }
+            )
+
+    # 7. Screenshot Capture
+    if not dns_resolved:
+        modules_results.append(
+            {
+                "module": "Screenshot Capture",
+                "status": "failed",
+                "evidence": {},
+                "error": "Browser timeout",
+            }
+        )
+    else:
+        try:
+            static_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "../../static")
+            )
+            shot_res = await capture_screenshot(url, static_dir)
+            if not shot_res.get("success"):
+                modules_results.append(
+                    {
+                        "module": "Screenshot Capture",
+                        "status": "failed",
+                        "evidence": {},
+                        "error": "Browser timeout",
+                    }
+                )
+            else:
+                modules_results.append(
+                    {
+                        "module": "Screenshot Capture",
+                        "status": "success",
+                        "evidence": {
+                            "screenshot_url": shot_res.get("screenshot_url"),
+                            "page_title": shot_res.get("page_title"),
+                        },
+                        "error": "",
+                    }
+                )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "Screenshot Capture",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": f"Browser timeout: {str(err)}",
+                }
+            )
+
+    # 8. HTML Metadata Extraction
+    html_content = ""
+    if not dns_resolved:
+        modules_results.append(
+            {
+                "module": "HTML Metadata Extraction",
+                "status": "skipped",
+                "evidence": {},
+                "error": "DNS resolution failed",
+            }
+        )
+    else:
+        try:
+            meta_res = extract_html_metadata(url)
+            html_content = meta_res.get("html_body", "")
+            modules_results.append(
+                {
+                    "module": "HTML Metadata Extraction",
+                    "status": "success",
+                    "evidence": {
+                        "title": meta_res.get("title", ""),
+                        "description": meta_res.get("description", ""),
+                        "keywords": meta_res.get("keywords", ""),
+                    },
+                    "error": "",
+                }
+            )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "HTML Metadata Extraction",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": str(err),
+                }
+            )
+
+    # 9. Favicon Extraction
+    if not dns_resolved:
+        modules_results.append(
+            {
+                "module": "Favicon Extraction",
+                "status": "skipped",
+                "evidence": {},
+                "error": "DNS resolution failed",
+            }
+        )
+    else:
+        try:
+            # Parse favicon from metadata screenshot or direct scrape
+            favicon_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+            modules_results.append(
+                {
+                    "module": "Favicon Extraction",
+                    "status": "success",
+                    "evidence": {"favicon_url": favicon_url},
+                    "error": "",
+                }
+            )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "Favicon Extraction",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": str(err),
+                }
+            )
+
+    # 10. Brand Detection
+    # Scan keywords inside page title or domain name targets
+    try:
+        typosquat_res = check_typosquatting(domain)
+        is_detected = typosquat_res.get("detected", False)
+        target_brand = typosquat_res.get("original_brand", "None")
+
+        modules_results.append(
+            {
+                "module": "Brand Detection",
+                "status": "success",
+                "evidence": {
+                    "brand_detected": is_detected,
+                    "target_brand": target_brand,
+                },
+                "error": "",
+            }
+        )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "Brand Detection",
+                "status": "failed",
+                "evidence": {},
+                "error": str(err),
+            }
+        )
+
+    # 11. Typosquatting Detection
+    try:
+        typosquat_res = check_typosquatting(domain)
+        modules_results.append(
+            {
+                "module": "Typosquatting Detection",
+                "status": "success",
+                "evidence": typosquat_res,
+                "error": "",
+            }
+        )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "Typosquatting Detection",
+                "status": "failed",
+                "evidence": {},
+                "error": str(err),
+            }
+        )
+
+    # 12. Phishing Keyword Detection
+    try:
+        detected_keywords = []
+        domain_parts = domain.lower().split(".")
+        for part in domain_parts:
+            for kw in PHISHING_KEYWORDS:
+                if kw in part and kw not in detected_keywords:
+                    detected_keywords.append(kw)
+
+        modules_results.append(
+            {
+                "module": "Phishing Keyword Detection",
+                "status": "success",
+                "evidence": {
+                    "keywords_found": len(detected_keywords) > 0,
+                    "keywords": detected_keywords,
+                },
+                "error": "",
+            }
+        )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "Phishing Keyword Detection",
+                "status": "failed",
+                "evidence": {},
+                "error": str(err),
+            }
+        )
+
+    # 13. Domain Reputation
+    try:
+        tld = domain.lower().split(".")[-1]
+        suspicious_tld = tld in SUSPICIOUS_TLDS
+        modules_results.append(
+            {
+                "module": "Domain Reputation",
+                "status": "success",
+                "evidence": {
+                    "tld": tld,
+                    "suspicious_tld": suspicious_tld,
+                    "reputation_score": 30 if suspicious_tld else 90,
+                },
+                "error": "",
+            }
+        )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "Domain Reputation",
+                "status": "failed",
+                "evidence": {},
+                "error": str(err),
+            }
+        )
+
+    # 14. PhishTank
+    try:
+        phishtank_res = check_phishtank(url)
+        modules_results.append(
+            {
+                "module": "PhishTank",
+                "status": "success",
+                "evidence": {
+                    "is_phishing": phishtank_res,
+                    "source": "PhishTank Database",
+                },
+                "error": "",
+            }
+        )
+    except Exception as err:
+        modules_results.append(
+            {
+                "module": "PhishTank",
+                "status": "failed",
+                "evidence": {},
+                "error": str(err),
+            }
+        )
+
+    # 15. Google Safe Browsing
+    gsb_key = settings.SAFE_BROWSING_API_KEY
+    if not gsb_key:
+        modules_results.append(
+            {
+                "module": "Google Safe Browsing",
+                "status": "skipped",
+                "evidence": {},
+                "error": "API not configured",
+            }
+        )
+    else:
+        try:
+            api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={gsb_key}"
+            payload = {
+                "client": {"clientId": "ScamON-AI", "clientVersion": "1.0.0"},
+                "threatInfo": {
+                    "threatTypes": [
+                        "MALWARE",
+                        "SOCIAL_ENGINEERING",
+                        "UNWANTED_SOFTWARE",
+                        "POTENTIALLY_HARMFUL_APPLICATION",
+                    ],
+                    "platformTypes": ["ANY_PLATFORM"],
+                    "threatEntryTypes": ["URL"],
+                    "threatEntries": [{"url": url}],
+                },
+            }
+            resp = requests.post(api_url, json=payload, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                matches = data.get("matches", [])
+                modules_results.append(
+                    {
+                        "module": "Google Safe Browsing",
+                        "status": "success",
+                        "evidence": {
+                            "is_flagged": len(matches) > 0,
+                            "matches": matches,
+                        },
+                        "error": "",
+                    }
+                )
+            else:
+                modules_results.append(
+                    {
+                        "module": "Google Safe Browsing",
+                        "status": "failed",
+                        "evidence": {},
+                        "error": f"API returned status {resp.status_code}",
+                    }
+                )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "Google Safe Browsing",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": str(err),
+                }
+            )
+
+    # 16. VirusTotal
+    vt_key = settings.VIRUSTOTAL_API_KEY
+    if not vt_key:
+        modules_results.append(
+            {
+                "module": "VirusTotal",
+                "status": "skipped",
+                "evidence": {},
+                "error": "API not configured",
+            }
+        )
+    else:
+        try:
+            headers = {"x-apikey": vt_key}
+            api_url = f"https://www.virustotal.com/api/v3/domains/{domain}"
+            resp = requests.get(api_url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                stats = (
+                    data.get("data", {})
+                    .get("attributes", {})
+                    .get("last_analysis_stats", {})
+                )
+                malicious = stats.get("malicious", 0)
+                modules_results.append(
+                    {
+                        "module": "VirusTotal",
+                        "status": "success",
+                        "evidence": {
+                            "malicious_votes": malicious,
+                            "stats": stats,
+                        },
+                        "error": "",
+                    }
+                )
+            else:
+                modules_results.append(
+                    {
+                        "module": "VirusTotal",
+                        "status": "failed",
+                        "evidence": {},
+                        "error": f"API returned status {resp.status_code}",
+                    }
+                )
+        except Exception as err:
+            modules_results.append(
+                {
+                    "module": "VirusTotal",
+                    "status": "failed",
+                    "evidence": {},
+                    "error": str(err),
+                }
+            )
+
+    # Compile successfully collected evidence only
+    verified_evidence = {}
+    for mod in modules_results:
+        if mod["status"] == "success" and mod["evidence"]:
+            verified_evidence[mod["module"]] = mod["evidence"]
+
+    # Calculate deterministic risk score & verdict categories
+    verdict = evaluate_security_risk(modules_results, url)
+
+    return {
+        "url": url,
+        "domain": domain,
+        "modules": modules_results,
+        "verified_evidence": verified_evidence,
+        "verdict": verdict,
+    }
+
+
+def evaluate_security_risk(
+    modules_results: List[Dict[str, Any]], url: str = ""
+) -> Dict[str, Any]:
+    """Applies a weighted risk scoring matrix to evaluate the final threat level
+    based ONLY on collected evidence facts.
+    """
+    dns_resolved = (
+        next(
+            (m for m in modules_results if m["module"] == "DNS Resolution"), {}
+        ).get("status")
+        == "success"
+    )
+
+    whois_mod = next(
+        (m for m in modules_results if m["module"] == "WHOIS Lookup"), {}
+    )
+    whois_failed = whois_mod.get("status") != "success"
+    whois_service_unavailable = (
+        whois_mod.get("status") == "failed"
+        and "unavailable" in str(whois_mod.get("error", "")).lower()
+    )
+
+    ssl_mod = next(
+        (
+            m
+            for m in modules_results
+            if m["module"] == "SSL Certificate Validation"
+        ),
+        {},
+    )
+    ssl_valid = (
+        ssl_mod.get("status") == "success"
+        and ssl_mod.get("evidence", {}).get("valid", False)
+    )
+
+    typosquat_mod = next(
+        (m for m in modules_results if m["module"] == "Typosquatting Detection"),
+        {},
+    )
+    brand_impersonation = (
+        typosquat_mod.get("status") == "success"
+        and typosquat_mod.get("evidence", {}).get("detected", False)
+    )
+    detected_brand = (
+        typosquat_mod.get("evidence", {}).get("original_brand", "None")
+        if typosquat_mod.get("status") == "success"
+        else "None"
+    )
+
+    kw_mod = next(
+        (
+            m
+            for m in modules_results
+            if m["module"] == "Phishing Keyword Detection"
+        ),
+        {},
+    )
+    detected_keywords = (
+        kw_mod.get("evidence", {}).get("keywords", [])
+        if kw_mod.get("status") == "success"
+        else []
+    )
+
+    rep_mod = next(
+        (m for m in modules_results if m["module"] == "Domain Reputation"), {}
+    )
+    suspicious_tld = (
+        rep_mod.get("evidence", {}).get("suspicious_tld", False)
+        if rep_mod.get("status") == "success"
+        else False
+    )
+
+    pt_mod = next((m for m in modules_results if m["module"] == "PhishTank"), {})
+    phishtank_match = (
+        pt_mod.get("status") == "success"
+        and pt_mod.get("evidence", {}).get("is_phishing", False)
+    )
+
+    gsb_mod = next(
+        (m for m in modules_results if m["module"] == "Google Safe Browsing"),
+        {},
+    )
+    gsb_alert = (
+        gsb_mod.get("status") == "success"
+        and gsb_mod.get("evidence", {}).get("is_flagged", False)
+    )
+
+    vt_mod = next(
+        (m for m in modules_results if m["module"] == "VirusTotal"), {}
+    )
+    vt_flagged = (
+        vt_mod.get("status") == "success"
+        and vt_mod.get("evidence", {}).get("malicious_votes", 0) > 2
+    )
+
+    redir_mod = next(
+        (m for m in modules_results if m["module"] == "Redirect Analysis"), {}
+    )
+    hop_count = (
+        redir_mod.get("evidence", {}).get("hops_count", 0)
+        if redir_mod.get("status") == "success"
+        else 0
+    )
+
+    http_mod = next(
+        (m for m in modules_results if m["module"] == "HTTP Status Check"), {}
+    )
+    http_success = (
+        http_mod.get("status") == "success"
+        and 200 <= http_mod.get("evidence", {}).get("status_code", 0) < 400
+    )
+
+    age_days = (
+        whois_mod.get("evidence", {}).get("age_days", -1)
+        if whois_mod.get("status") == "success"
+        else -1
+    )
+    young_domain = 0 <= age_days < 90
+
+    # Extract target domain from url or validation
+    domain_lower = ""
+    if url:
+        try:
+            parsed_u = urlparse(url)
+            domain_lower = parsed_u.netloc.split(":")[0].lower().strip()
+        except Exception:
+            pass
+    if not domain_lower:
+        url_val_mod = next((m for m in modules_results if m["module"] == "URL Validation"), {})
+        domain_lower = url_val_mod.get("evidence", {}).get("netloc", "").split(":")[0].lower().strip()
+
+    # Subdomain resolution to parent domain
+    parent_domain = domain_lower
+    if domain_lower:
+        parts = domain_lower.split(".")
+        if len(parts) >= 2:
+            double_tlds = {"co.uk", "org.uk", "co.jp", "com.cn", "co.in", "org.in", "gov.in", "ac.in", "net.in", "gov.uk"}
+            last_two = ".".join(parts[-2:])
+            last_three = ".".join(parts[-3:])
+            if last_two in double_tlds and len(parts) >= 3:
+                parent_domain = last_three
+            else:
+                if len(parts) >= 3 and parts[-2] in ("co", "com", "org", "net", "gov", "ac"):
+                    parent_domain = last_three
+                else:
+                    parent_domain = last_two
+
+    # Trusted parent domains check
+    TRUSTED_ORGANIZATIONS = [
+        "google.com", "google.co.in", "youtube.com", "gmail.com", "android.com", "gstatic.com", "googleapis.com",
+        "microsoft.com", "office.com", "live.com", "outlook.com", "skype.com",
+        "amazon.com", "amazon.in", "aws.amazon.com", "media-amazon.com",
+        "apple.com", "icloud.com",
+        "github.com", "githubusercontent.com",
+        "cloudflare.com",
+    ]
+    is_trusted_parent = any(
+        parent_domain == td or parent_domain.endswith("." + td) or domain_lower == td or domain_lower.endswith("." + td)
+        for td in TRUSTED_ORGANIZATIONS
+    )
+
+    # Risk weights configuration
+    score = 0
+    indicators = []
+
+    if phishtank_match:
+        score += 45
+        indicators.append("Known phishing blacklist match (PhishTank)")
+    if gsb_alert:
+        score += 40
+        indicators.append("Google Safe Browsing reputation alert")
+    if vt_flagged:
+        score += 30
+        indicators.append("VirusTotal security scanners alert")
+    if brand_impersonation:
+        score += 35
+        indicators.append(f"Brand impersonation detected: {detected_brand}")
+    if suspicious_tld:
+        score += 15
+        indicators.append("Suspicious Top-Level Domain (TLD) extension")
+    if len(detected_keywords) > 0:
+        score += 20
+        indicators.append(f"Phishing keywords found: {detected_keywords}")
+    if not ssl_valid and dns_resolved:
+        score += 20
+        indicators.append("Invalid or missing SSL security certificate")
+    if young_domain:
+        score += 20
+        indicators.append("Recently registered young domain (<90 days)")
+    if whois_failed and not whois_service_unavailable:
+        score += 10
+        indicators.append(
+            "WHOIS registry query failure (unregistered/masked registrar)"
+        )
+    if hop_count > 1:
+        score += 15
+        indicators.append("Multiple redirect chain hops detected")
+
+    score = min(max(score, 0), 100)
+
+    # Count malicious signals
+    malicious_signals = 0
+    if phishtank_match:
+        malicious_signals += 1
+    if gsb_alert:
+        malicious_signals += 1
+    if vt_flagged:
+        malicious_signals += 1
+
+    # Overrule checks for trusted domains
+    if is_trusted_parent:
+        # Never classify a trusted domain as malicious/phishing unless multiple independent modules confirm
+        if malicious_signals < 2:
+            score = 0
+            decision = "SAFE"
+            confidence = 99
+            reason = "Trusted organization domain verified as legitimate. Isolated alerts or WHOIS failures overruled."
+        else:
+            decision = "HIGH RISK"
+            confidence = 95
+            reason = "Multiple independent malicious modules confirmed threat activity on trusted domain name."
+    # Rule 5: If SSL is valid, HTTP status is successful, and parent is trusted, verdict is SAFE even if WHOIS fails
+    elif ssl_valid and http_success and is_trusted_parent:
+        score = 0
+        decision = "SAFE"
+        confidence = 99
+        reason = "Trusted parent organization with valid SSL and successful HTTP status. Validated safe link."
+    else:
+        # Normal verdict classification logic
+        has_other_threats = (
+            phishtank_match or gsb_alert or young_domain or suspicious_tld or len(detected_keywords) > 1
+        )
+
+        if brand_impersonation and ssl_valid and not has_other_threats:
+            decision = "SUSPICIOUS"
+            confidence = 70
+            reason = "Contradictory evidence: Website exhibits valid SSL but triggers brand impersonation. Manual review recommended."
+        elif score >= 70 or (
+            brand_impersonation
+            and (
+                suspicious_tld
+                or young_domain
+                or not ssl_valid
+                or phishtank_match
+                or gsb_alert
+            )
+        ):
+            decision = "HIGH RISK"
+            confidence = 95
+            reason = "Multiple threat indicators agree (brand impersonation, young domain, suspicious TLD, or database matching)."
+        elif score >= 35 or not ssl_valid:
+            # Removed whois_failed override here to fulfill Rule 1: WHOIS failure alone must never increase risk significantly
+            decision = "SUSPICIOUS"
+            confidence = 80
+            reason = "Incomplete evidence or failed compliance checks. Further manual verification suggested."
+        else:
+            decision = "SAFE"
+            confidence = 90
+            reason = (
+                "No brand abuse, valid SSL, clean reputation, and trusted domain traits."
+            )
+
+    return {
+        "risk_score": score,
+        "decision": decision,
+        "confidence": confidence,
+        "reason": reason,
+        "indicators": indicators,
+        "detected_brand": detected_brand,
+        "detected_keywords": detected_keywords,
+    }
