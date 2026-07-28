@@ -57,105 +57,28 @@ def write_local_db(data: Dict[str, Any]) -> None:
 
 
 def flush_dns() -> None:
-    """Runs ipconfig /flushdns to clear local resolver cache."""
-    try:
-        logger.info("Executing DNS resolver cache flush...")
-        result = subprocess.run(
-            ["ipconfig", "/flushdns"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        logger.info(f"DNS Cache Flushed successfully: {result.stdout.strip()}")
-    except Exception as err:
-        logger.warning(f"Failed to execute ipconfig DNS cache flush: {err}")
+    """DNS flush mock (Chrome Extension handles blocking now)."""
+    pass
 
 
 def add_to_hosts_file(domain: str) -> None:
-    """Adds the domain and its www subdomain to the Windows hosts file."""
-    if not os.path.exists(HOSTS_PATH):
-        raise FileNotFoundError(f"Windows hosts file not found at path: {HOSTS_PATH}")
-
-    entry_1 = f"127.0.0.1 {domain}"
-    entry_2 = f"127.0.0.1 www.{domain}"
-
-    with open(HOSTS_PATH, "r") as f:
-        content = f.read()
-
-    # Check if entries already exist
-    has_e1 = entry_1 in content
-    has_e2 = entry_2 in content
-
-    if not has_e1 or not has_e2:
-        with open(HOSTS_PATH, "a") as f:
-            if not content.endswith("\n") and len(content) > 0:
-                f.write("\n")
-            if not has_e1:
-                f.write(f"{entry_1}\n")
-                logger.info(f"Added {entry_1} to hosts file.")
-            if not has_e2:
-                f.write(f"{entry_2}\n")
-                logger.info(f"Added {entry_2} to hosts file.")
+    """Hosts file add mock."""
+    pass
 
 
 def remove_from_hosts_file(domain: str) -> None:
-    """Removes any block list entries for the domain from the hosts file."""
-    if not os.path.exists(HOSTS_PATH):
-        return
-
-    with open(HOSTS_PATH, "r") as f:
-        lines = f.readlines()
-
-    target_domain = domain.lower().strip()
-    new_lines = []
-    removed_any = False
-
-    for line in lines:
-        stripped = line.strip().lower()
-        # Skip comment lines
-        if stripped.startswith("#"):
-            new_lines.append(line)
-            continue
-
-        parts = stripped.split()
-        if len(parts) >= 2 and parts[0] == "127.0.0.1":
-            mapped_host = parts[1].strip()
-            if mapped_host == target_domain or mapped_host == f"www.{target_domain}":
-                removed_any = True
-                logger.info(f"Removed entry for {mapped_host} from hosts file.")
-                continue
-
-        new_lines.append(line)
-
-    if removed_any:
-        with open(HOSTS_PATH, "w") as f:
-            f.writelines(new_lines)
+    """Hosts file remove mock."""
+    pass
 
 
 def verify_hosts_blocked(domain: str) -> bool:
-    """Verifies that domain is mapped in hosts file."""
-    try:
-        if not os.path.exists(HOSTS_PATH):
-            return False
-        with open(HOSTS_PATH, "r") as f:
-            hosts_content = f.read()
-        return f"127.0.0.1 {domain}" in hosts_content or f"0.0.0.0 {domain}" in hosts_content
-    except Exception as err:
-        logger.warning(f"Verification read error: {err}")
-        return False
+    """Hosts check mock."""
+    return True
 
 
 def verify_hosts_unblocked(domain: str) -> bool:
-    """Verifies that domain is NOT mapped in hosts file."""
-    try:
-        if not os.path.exists(HOSTS_PATH):
-            return True
-        with open(HOSTS_PATH, "r") as f:
-            hosts_content = f.read()
-        return f"127.0.0.1 {domain}" not in hosts_content and f"0.0.0.0 {domain}" not in hosts_content
-    except Exception as err:
-        logger.warning(f"Verification read error: {err}")
-        return False
+    """Hosts check mock."""
+    return True
 
 
 def is_domain_blocked(domain: str) -> bool:
@@ -263,7 +186,7 @@ def block_domain(
     threat_type: str = "",
     blocked_by: str = "Website Investigation Agent"
 ) -> Dict[str, Any]:
-    """Blocks a domain by adding it to DB, hosts file, flushing DNS cache, and verifying it."""
+    """Blocks a domain by adding it to the DB."""
     target = normalize_domain_name(domain)
     target_url = url or f"https://{target}"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -327,60 +250,28 @@ def block_domain(
             "unblocked": False,
             "blocked_time": timestamp,
             "unblocked_time": None,
-            "blocked_by": "Website Investigation Agent",
+            "blocked_by": blocked_by,
             "reason": reason
         })
     local_data["blocklist"] = blocklist
     write_local_db(local_data)
     db_success = True
 
-    # 2. Modify Windows Hosts File
-    hosts_success = False
-    error_reason = None
-    admin_error = False
-
-    try:
-        add_to_hosts_file(target)
-        # Verify hosts file block modification using helper
-        hosts_success = verify_hosts_blocked(target)
-        if not hosts_success:
-            error_reason = "Verification Failed: Block entries not registered in hosts file."
-    except PermissionError as perm_err:
-        admin_error = True
-        error_reason = f"Permission Denied: Administrator privileges required to edit hosts file ({perm_err})"
-        logger.warning(f"Permission error editing hosts file for {target}: {perm_err}")
-    except Exception as err:
-        error_reason = str(err)
-        logger.warning(f"System error editing hosts file for {target}: {err}")
-
-    # 3. Flush DNS Resolver Cache
-    flush_dns()
-
     # 4. Log to history
-    log_block_history(target, "block", hosts_success, reason)
+    log_block_history(target, "block", True, reason)
 
-    if db_success:
-        return {
-            "success": True,
-            "message": "Website Successfully Blocked." if hosts_success else "Website Blocked in ScamShield database, but Administrator privileges are required to update Windows hosts file.",
-            "error": error_reason,
-            "admin_error": admin_error,
-            "blocked_time": timestamp,
-            "blocked_by": "Website Investigation Agent"
-        }
-    else:
-        return {
-            "success": False,
-            "message": "Failed to update block status in database.",
-            "error": "Database error",
-            "admin_error": False,
-            "blocked_time": None,
-            "blocked_by": None
-        }
+    return {
+        "success": True,
+        "message": "Website Successfully Blocked.",
+        "error": None,
+        "admin_error": False,
+        "blocked_time": timestamp,
+        "blocked_by": blocked_by
+    }
 
 
 def unblock_domain(domain: str) -> Dict[str, Any]:
-    """Unblocks a domain by removing from DB, hosts file, flushing DNS cache, and verifying it."""
+    """Unblocks a domain by removing block status from DB."""
     target = normalize_domain_name(domain)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -395,8 +286,8 @@ def unblock_domain(domain: str) -> Dict[str, Any]:
                 {"$set": {
                     "blocked": False,
                     "unblocked": True,
-                    "unblocked_time": timestamp,
-                    "reason": "User manual unblock"
+                    "unblocked_at": timestamp,
+                    "updated_at": timestamp
                 }},
                 upsert=True
             )
@@ -417,47 +308,12 @@ def unblock_domain(domain: str) -> Dict[str, Any]:
     write_local_db(local_data)
     db_success = True
 
-    # 2. Modify Windows Hosts File
-    hosts_success = False
-    error_reason = None
-    admin_error = False
+    # Log to history
+    log_block_history(target, "unblock", True, "Successfully unblocked.")
 
-    try:
-        remove_from_hosts_file(target)
-        # Verify hosts file unblock modification using helper
-        hosts_success = verify_hosts_unblocked(target)
-        if not hosts_success:
-            error_reason = "Verification Failed: Block entries still remain in hosts file."
-    except PermissionError as perm_err:
-        admin_error = True
-        error_reason = f"Permission Denied: Administrator privileges required to edit hosts file ({perm_err})"
-        logger.warning(f"Permission error editing hosts file for {target}: {perm_err}")
-    except Exception as err:
-        error_reason = str(err)
-        logger.warning(f"System error editing hosts file for {target}: {err}")
-
-    # 3. Flush DNS Resolver Cache
-    flush_dns()
-
-    # 4. Log to history
-    status_details = (
-        "Successfully removed from hosts file and DB."
-        if hosts_success
-        else f"DB updated. Hosts failed: {error_reason}"
-    )
-    log_block_history(target, "unblock", hosts_success, status_details)
-
-    if db_success:
-        return {
-            "success": True,
-            "message": "Website Successfully Unblocked." if hosts_success else "Website Unblocked in ScamShield database, but Administrator privileges are required to update Windows hosts file.",
-            "error": error_reason,
-            "admin_error": admin_error,
-        }
-    else:
-        return {
-            "success": False,
-            "message": "Failed to update unblock status in database.",
-            "error": "Database error",
-            "admin_error": False,
-        }
+    return {
+        "success": True,
+        "message": "Website Successfully Unblocked.",
+        "error": None,
+        "admin_error": False,
+    }

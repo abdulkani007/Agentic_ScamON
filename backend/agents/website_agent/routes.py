@@ -776,18 +776,66 @@ async def api_unblock_website(req: WebsiteUnblockRequest) -> WebsiteActionRespon
 )
 async def api_get_blocked_websites() -> List[BlockedWebsiteItem]:
     db = get_db()
-    if db is None:
-        return []
+    if db is not None:
+        try:
+            cursor = db["blocked_websites"].find().sort("updated_at", -1)
+            items = []
+            for doc in cursor:
+                doc["_id"] = str(doc["_id"])
+                items.append(BlockedWebsiteItem(**doc))
+            return items
+        except Exception as err:
+            logger.error(f"Failed to fetch blocked websites via MongoDB: {err}")
+
+    # Fallback to local JSON DB
     try:
-        cursor = db["blocked_websites"].find().sort("updated_at", -1)
+        from agents.website_agent.protection_engine import read_local_db
+        local_data = read_local_db()
         items = []
-        for doc in cursor:
-            doc["_id"] = str(doc["_id"])
-            items.append(BlockedWebsiteItem(**doc))
+        for item in local_data.get("blocklist", []):
+            if item.get("blocked", True) is True:
+                items.append(BlockedWebsiteItem(
+                    domain=item.get("domain"),
+                    url=item.get("url") or f"https://{item.get('domain')}",
+                    risk_score=item.get("risk_score") or 90,
+                    threat_type=item.get("threat_type") or "Malware",
+                    reason=item.get("reason") or "Blocked",
+                    blocked=True,
+                    blocked_at=item.get("blocked_time"),
+                    unblocked=False,
+                    unblocked_at=None,
+                    blocked_by=item.get("blocked_by") or "Website Investigation Agent",
+                    created_at=item.get("blocked_time"),
+                    updated_at=item.get("blocked_time")
+                ))
         return items
     except Exception as err:
-        logger.error(f"Failed to fetch blocked websites via API: {err}")
+        logger.error(f"Failed to fetch blocked websites via local DB fallback: {err}")
         return []
+
+
+@router.get(
+    "/api/websites/check",
+    summary="Checks if a domain is currently blocked via query parameter.",
+    tags=["Protection APIs"]
+)
+async def api_check_website_blocked_query(domain: str):
+    try:
+        normalized = normalize_domain_name(domain)
+        db = get_db()
+        if db is not None:
+            collection = db["blocked_websites"]
+            doc = collection.find_one({"domain": normalized})
+            if doc and doc.get("blocked", True) is True:
+                return {
+                    "blocked": True,
+                    "reason": doc.get("reason") or "Phishing Website",
+                    "risk_score": doc.get("risk_score") or 90
+                }
+        return {"blocked": False}
+    except Exception as err:
+        logger.error(f"Failed to check website query status: {err}")
+        return {"blocked": False}
 
 
 @router.get(

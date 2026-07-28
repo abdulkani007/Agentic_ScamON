@@ -9,10 +9,37 @@ client = TestClient(app)
 def clean_db():
     db = get_db()
     if db is not None:
-        db["blocked_websites"].delete_many({})
+        try:
+            db["blocked_websites"].delete_many({})
+        except Exception:
+            pass
+            
+    import json
+    import os
+    local_db_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../static/protection_db.json")
+    )
+    if os.path.exists(local_db_path):
+        try:
+            with open(local_db_path, "w") as f:
+                json.dump({"blocklist": [], "history": []}, f, indent=2)
+        except Exception:
+            pass
+            
     yield
+    
     if db is not None:
-        db["blocked_websites"].delete_many({})
+        try:
+            db["blocked_websites"].delete_many({})
+        except Exception:
+            pass
+            
+    if os.path.exists(local_db_path):
+        try:
+            with open(local_db_path, "w") as f:
+                json.dump({"blocklist": [], "history": []}, f, indent=2)
+        except Exception:
+            pass
 
 def test_api_block_website():
     payload = {

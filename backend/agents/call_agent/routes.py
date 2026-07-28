@@ -292,3 +292,32 @@ async def analyze_call(
     return response_payload
 
 
+@router.get(
+    "/api/websites/check",
+    summary="Checks if a domain is currently blocked via query parameter.",
+)
+async def api_check_website_blocked_query(domain: str):
+    try:
+        target = domain.strip().lower()
+        if target.startswith(("http://", "https://")):
+            from urllib.parse import urlparse
+            target = urlparse(target).netloc
+        if target.startswith("www."):
+            target = target[4:]
+        target = target.split(":")[0]
+        
+        from database import get_db
+        db = get_db()
+        if db is not None:
+            collection = db["blocked_websites"]
+            doc = collection.find_one({"domain": target})
+            if doc and doc.get("blocked", True) is True:
+                return {
+                    "blocked": True,
+                    "reason": doc.get("reason") or "Phishing Website",
+                    "risk_score": doc.get("risk_score") or 90
+                }
+        return {"blocked": False}
+    except Exception as err:
+        logger.error(f"Failed to check website query status in call agent: {err}")
+        return {"blocked": False}
