@@ -414,8 +414,8 @@ async def live_call_websocket(websocket: WebSocket):
             if "bytes" in message:
                 audio_data = message["bytes"]
                 if len(audio_data) > 0:
-                    # Append audio chunk to temp file
-                    with open(temp_path, "ab") as f:
+                    # Overwrite temp file with the complete audio blob
+                    with open(temp_path, "wb") as f:
                         f.write(audio_data)
                     
                     # Run STT transcription in a thread pool to avoid blocking ASGI loop
@@ -426,6 +426,7 @@ async def live_call_websocket(websocket: WebSocket):
                             None, transcribe_audio, temp_path
                         )
                         new_transcript = stt_res.get("transcript", "").strip()
+                        logger.info(f"STT Live Transcribed segment: '{new_transcript}'")
                         
                         if new_transcript and new_transcript != running_transcript:
                             running_transcript = new_transcript

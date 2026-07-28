@@ -23,6 +23,7 @@ export default function LiveCallDetector() {
   const audioContextRef = useRef(null);
   const soundIntervalRef = useRef(null);
   const transcriptEndRef = useRef(null);
+  const chunksRef = useRef([]);
 
   // Auto-scroll transcript panel
   useEffect(() => {
@@ -95,14 +96,19 @@ export default function LiveCallDetector() {
         setIsListening(true);
         setMicStatus('LISTENING...');
         setTranscript('Connection established. Capturing audio from microphone...\n');
+        chunksRef.current = [];
 
         // Start media recorder
         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         mediaRecorderRef.current = mediaRecorder;
 
         mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(event.data);
+          if (event.data.size > 0) {
+            chunksRef.current.push(event.data);
+            const completeBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(completeBlob);
+            }
           }
         };
 
