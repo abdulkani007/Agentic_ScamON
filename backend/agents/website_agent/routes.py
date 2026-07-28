@@ -822,17 +822,40 @@ async def api_get_blocked_websites() -> List[BlockedWebsiteItem]:
 async def api_check_website_blocked_query(domain: str):
     try:
         normalized = normalize_domain_name(domain)
+        from agents.website_agent.protection_engine import is_domain_blocked
+        if not is_domain_blocked(normalized):
+            return {"blocked": False}
+
         db = get_db()
+        reason = "Phishing Website"
+        risk_score = 90
+        
         if db is not None:
-            collection = db["blocked_websites"]
-            doc = collection.find_one({"domain": normalized})
-            if doc and doc.get("blocked", True) is True:
-                return {
-                    "blocked": True,
-                    "reason": doc.get("reason") or "Phishing Website",
-                    "risk_score": doc.get("risk_score") or 90
-                }
-        return {"blocked": False}
+            try:
+                collection = db["blocked_websites"]
+                doc = collection.find_one({"domain": normalized})
+                if doc:
+                    reason = doc.get("reason") or reason
+                    risk_score = doc.get("risk_score") or risk_score
+            except Exception:
+                pass
+        else:
+            try:
+                from agents.website_agent.protection_engine import read_local_db
+                local_data = read_local_db()
+                for item in local_data.get("blocklist", []):
+                    if item.get("domain") == normalized:
+                        reason = item.get("reason") or reason
+                        risk_score = item.get("risk_score") or risk_score
+                        break
+            except Exception:
+                pass
+
+        return {
+            "blocked": True,
+            "reason": reason,
+            "risk_score": risk_score
+        }
     except Exception as err:
         logger.error(f"Failed to check website query status: {err}")
         return {"blocked": False}

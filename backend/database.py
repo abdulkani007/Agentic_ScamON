@@ -31,8 +31,8 @@ def get_db_client():
         _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         # Test connection by pinging server
         _client.admin.command("ping")
-        print("✅ Connected to MongoDB Atlas")
-        logger.info("✅ Connected to MongoDB Atlas")
+        print("Connected to MongoDB Atlas")
+        logger.info("Connected to MongoDB Atlas")
 
         # Automatically create required collections if they do not exist
         db = _client[DATABASE_NAME]

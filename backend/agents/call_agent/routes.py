@@ -305,18 +305,80 @@ async def api_check_website_blocked_query(domain: str):
         if target.startswith("www."):
             target = target[4:]
         target = target.split(":")[0]
+
+        blocked = False
+        reason = "Phishing Website"
+        risk_score = 90
         
-        from database import get_db
-        db = get_db()
-        if db is not None:
-            collection = db["blocked_websites"]
-            doc = collection.find_one({"domain": target})
-            if doc and doc.get("blocked", True) is True:
-                return {
-                    "blocked": True,
-                    "reason": doc.get("reason") or "Phishing Website",
-                    "risk_score": doc.get("risk_score") or 90
-                }
+        try:
+            from agents.website_agent.protection_engine import is_domain_blocked
+            blocked = is_domain_blocked(target)
+        except Exception:
+            # Fallback if package is not importable
+            from database import get_db
+            db = get_db()
+            if db is not None:
+                try:
+                    collection = db["blocked_websites"]
+                    doc = collection.find_one({"domain": target})
+                    if doc and doc.get("blocked", True) is True:
+                        blocked = True
+                        reason = doc.get("reason") or reason
+                        risk_score = doc.get("risk_score") or risk_score
+                except Exception:
+                    pass
+            else:
+                try:
+                    import json
+                    local_db_path = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "../../static/protection_db.json")
+                    )
+                    if os.path.exists(local_db_path):
+                        with open(local_db_path, "r") as f:
+                            data = json.load(f)
+                            for item in data.get("blocklist", []):
+                                if item.get("domain") == target and item.get("blocked", False) is True:
+                                    blocked = True
+                                    reason = item.get("reason") or reason
+                                    risk_score = item.get("risk_score") or risk_score
+                                    break
+                except Exception:
+                    pass
+
+        if blocked:
+            from database import get_db
+            db = get_db()
+            if db is not None:
+                try:
+                    collection = db["blocked_websites"]
+                    doc = collection.find_one({"domain": target})
+                    if doc:
+                        reason = doc.get("reason") or reason
+                        risk_score = doc.get("risk_score") or risk_score
+                except Exception:
+                    pass
+            else:
+                try:
+                    import json
+                    local_db_path = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "../../static/protection_db.json")
+                    )
+                    if os.path.exists(local_db_path):
+                        with open(local_db_path, "r") as f:
+                            data = json.load(f)
+                            for item in data.get("blocklist", []):
+                                if item.get("domain") == target:
+                                    reason = item.get("reason") or reason
+                                    risk_score = item.get("risk_score") or risk_score
+                                    break
+                except Exception:
+                    pass
+
+            return {
+                "blocked": True,
+                "reason": reason,
+                "risk_score": risk_score
+            }
         return {"blocked": False}
     except Exception as err:
         logger.error(f"Failed to check website query status in call agent: {err}")

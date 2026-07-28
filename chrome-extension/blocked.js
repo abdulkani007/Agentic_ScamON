@@ -14,3 +14,13 @@ document.getElementById('blocked-score').textContent = `${score}%`;
 const now = new Date();
 const formattedTime = now.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
 document.getElementById('blocked-time').textContent = formattedTime;
+
+// Redirection action back to original target URL when unblocked
+document.getElementById('bypass-btn').addEventListener('click', () => {
+  const originalUrl = params.get('url');
+  if (originalUrl) {
+    window.location.href = originalUrl;
+  } else {
+    window.location.href = 'https://' + domain;
+  }
+});
