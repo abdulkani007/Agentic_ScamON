@@ -141,7 +141,15 @@ You must respond strictly with a JSON object. Do not include any markdown format
     "Fact-based reasoning step 1",
     "Fact-based reasoning step 2"
   ],
-  "recommended_action": "Block Website" // Ignore Call, Do Not Share OTP, Block Caller, Report Number, Notify Cyber Crime Portal, Block Website, Notify SOC
+  "recommended_action": "Block Website", // Ignore Call, Do Not Share OTP, Block Caller, Report Number, Notify Cyber Crime Portal, Block Website, Notify SOC
+  "trust_indicators": [
+    "✔ HTTPS Enabled",
+    "✔ Valid SSL Certificate"
+  ],
+  "risk_indicators": [
+    "⚠ Website preview unavailable (No impact)",
+    "❌ Brand Impersonation detected"
+  ]
 }}
 """
 
@@ -168,8 +176,25 @@ You must respond strictly with a JSON object. Do not include any markdown format
                 content = result["choices"][0]["message"]["content"]
                 parsed = json.loads(content)
                 logger.info(
-                    f"Groq reasoning complete. Verdict: {parsed.get('final_decision')}"
+                    f"Groq reasoning complete. Raw LLM Verdict: {parsed.get('final_decision')}"
                 )
+                # Enforce exact alignment with deterministic engine to prevent false positives
+                det_decision = verdict.get("decision", "SAFE")
+                parsed["final_decision"] = det_decision
+                if det_decision == "SAFE":
+                    parsed["threat_category"] = "None (Legitimate Service)"
+                    parsed["recommended_action"] = "Open Website"
+                elif det_decision == "HIGH RISK":
+                    parsed["recommended_action"] = "Block Website"
+                elif det_decision == "SUSPICIOUS":
+                    parsed["recommended_action"] = "Notify SOC"
+                    parsed["threat_category"] = "Suspicious Website"
+
+                # Ensure fields exist in parsed JSON
+                if "trust_indicators" not in parsed:
+                    parsed["trust_indicators"] = verdict.get("trust_indicators", [])
+                if "risk_indicators" not in parsed:
+                    parsed["risk_indicators"] = verdict.get("risk_indicators", [])
                 return parsed
             else:
                 logger.warning(
@@ -184,6 +209,9 @@ You must respond strictly with a JSON object. Do not include any markdown format
     # 3. Failsafe Rule-Based Fallback
     logger.info("Executing rule-based AI reasoning engine fallback...")
     reasoning_steps = [f"Deterministic Indicator: {ind}" for ind in verdict.get("indicators", [])]
+    if not reasoning_steps:
+        # Fallback to trust/risk indicators
+        reasoning_steps = [f"Detail: {ind}" for ind in (verdict.get("trust_indicators", []) + verdict.get("risk_indicators", []))]
     if not reasoning_steps:
         reasoning_steps.append("All primary security checks completed cleanly.")
 
@@ -202,10 +230,12 @@ You must respond strictly with a JSON object. Do not include any markdown format
 
     return {
         "summary": verdict.get("reason", "Forensic threat investigation completed."),
-        "technical_findings": f"Deterministic risk evaluation score: {verdict.get('risk_score')}/100. Matched indicators: {', '.join(verdict.get('indicators', []))}.",
+        "technical_findings": f"Deterministic risk evaluation score: {verdict.get('risk_score')}/100.",
         "threat_category": threat_cat,
         "confidence_rating": verdict.get("confidence", 85),
         "final_decision": verdict.get("decision", "SUSPICIOUS"),
         "reasoning_steps": reasoning_steps,
         "recommended_action": rec,
+        "trust_indicators": verdict.get("trust_indicators", []),
+        "risk_indicators": verdict.get("risk_indicators", [])
     }

@@ -411,71 +411,211 @@ async def api_check_website_blocked_query(domain: str):
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 import time
+import numpy as np
+import ctranslate2
+from faster_whisper import WhisperModel
+
+_global_whisper_model = None
+_global_device = None
+
+async def get_whisper_model():
+    global _global_whisper_model, _global_device
+    if _global_whisper_model is None:
+        loop = asyncio.get_event_loop()
+        def load():
+            global _global_whisper_model, _global_device
+            try:
+                if ctranslate2.get_cuda_device_count() > 0:
+                    logger.info("NVIDIA GPU detected. Loading faster-whisper 'base' on CUDA...")
+                    _global_whisper_model = WhisperModel("base", device="cuda", compute_type="float16")
+                    _global_device = "cuda"
+                    logger.info("Successfully loaded faster-whisper 'base' on CUDA.")
+            except Exception as e:
+                logger.warning(f"Failed to load Whisper on CUDA: {e}. Falling back to CPU.")
+                
+            if _global_whisper_model is None:
+                logger.info("Loading faster-whisper 'tiny' on CPU...")
+                _global_whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                _global_device = "cpu"
+                logger.info("Successfully loaded faster-whisper 'tiny' on CPU.")
+        await loop.run_in_executor(None, load)
+    return _global_whisper_model, _global_device
+
+def force_cpu_fallback():
+    global _global_whisper_model, _global_device
+    logger.warning("Forcing CPU fallback for Whisper model...")
+    _global_whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+    _global_device = "cpu"
+    return _global_whisper_model
+
+class StreamingTranscriber:
+    def __init__(self, model, device):
+        self.audio_buffer = [] # Float32 samples
+        self.sample_rate = 16000
+        self.silence_threshold = 1.0 # 1 second of silence to finalize
+        self.silence_samples = int(self.silence_threshold * self.sample_rate)
+        self.consecutive_silence_samples = 0
+        self.energy_threshold = 0.002 # VAD energy threshold
+        self.model = model
+        self.device = device
+
+    def add_audio(self, pcm_chunk: np.ndarray):
+        energy = np.sqrt(np.mean(pcm_chunk ** 2)) if len(pcm_chunk) > 0 else 0
+        self.audio_buffer.extend(pcm_chunk.tolist())
+        
+        if energy < self.energy_threshold:
+            self.consecutive_silence_samples += len(pcm_chunk)
+        else:
+            self.consecutive_silence_samples = 0
+
+    def should_finalize(self) -> bool:
+        # Finalize if 1 second of silence OR rolling buffer reaches 10 seconds to limit CPU load
+        too_long = len(self.audio_buffer) >= (10 * self.sample_rate)
+        silent = self.consecutive_silence_samples >= self.silence_samples and len(self.audio_buffer) > 0
+        return silent or too_long
+
+    def get_audio_data(self) -> np.ndarray:
+        return np.array(self.audio_buffer, dtype=np.float32)
+
+    def clear_buffer(self):
+        self.audio_buffer = []
+        self.consecutive_silence_samples = 0
+
+    def transcribe(self, is_final: bool = False) -> tuple:
+        if len(self.audio_buffer) == 0:
+            return None, ""
+        try:
+            audio_data = self.get_audio_data()
+            segments, info = self.model.transcribe(
+                audio_data,
+                beam_size=5,
+                language="en",
+                vad_filter=True,
+                vad_parameters=dict(min_speech_duration_ms=250)
+            )
+            segments = list(segments)
+            if not segments:
+                return None, ""
+                
+            if is_final or len(segments) == 1:
+                text = " ".join([seg.text for seg in segments]).strip()
+                return None, text
+                
+            final_segs = segments[:-1]
+            partial_seg = segments[-1]
+            
+            final_text = " ".join([seg.text for seg in final_segs]).strip()
+            partial_text = partial_seg.text.strip()
+            
+            cut_time = final_segs[-1].end
+            cut_samples = int(cut_time * self.sample_rate)
+            if cut_samples < len(self.audio_buffer):
+                self.audio_buffer = self.audio_buffer[cut_samples:]
+                self.consecutive_silence_samples = max(0, self.consecutive_silence_samples - cut_samples)
+                
+            return final_text, partial_text
+        except Exception as e:
+            err_str = str(e)
+            logger.error(f"Error during streaming transcription: {err_str}")
+            # Catch cuBLAS or general CUDA load failures and fall back to CPU on-the-fly
+            if "cublas" in err_str or "cuda" in err_str.lower():
+                if self.device != "cpu":
+                    logger.warning("CUDA execution error detected. Reloading Whisper model 'tiny' on CPU...")
+                    try:
+                        self.model = force_cpu_fallback()
+                        self.device = "cpu"
+                        # Retry transcription once on CPU
+                        audio_data = self.get_audio_data()
+                        segments, info = self.model.transcribe(
+                            audio_data,
+                            beam_size=5,
+                            language="en",
+                            vad_filter=True,
+                            vad_parameters=dict(min_speech_duration_ms=250)
+                        )
+                        segments = list(segments)
+                        if not segments:
+                            return None, ""
+                        if is_final or len(segments) == 1:
+                            text = " ".join([seg.text for seg in segments]).strip()
+                            return None, text
+                        final_segs = segments[:-1]
+                        partial_seg = segments[-1]
+                        final_text = " ".join([seg.text for seg in final_segs]).strip()
+                        partial_text = partial_seg.text.strip()
+                        cut_time = final_segs[-1].end
+                        cut_samples = int(cut_time * self.sample_rate)
+                        if cut_samples < len(self.audio_buffer):
+                            self.audio_buffer = self.audio_buffer[cut_samples:]
+                        return final_text, partial_text
+                    except Exception as cpu_err:
+                        logger.error(f"Failed CPU fallback transcription: {cpu_err}")
+            return None, ""
+
+from starlette.websockets import WebSocketState
 
 @router.websocket("/api/live-call/ws")
 async def live_call_websocket(websocket: WebSocket, case_id: Optional[str] = None):
     await websocket.accept()
-    logger.info("Live Call Detector WebSocket connection established.")
+    logger.info("Live Call Detector Real-Time Ingest WebSocket established.")
     
-    # Create a unique session ID and temp file to hold incoming audio chunks
+    # Retrieve the model asynchronously without blocking the event loop
+    model, device = await get_whisper_model()
+    
     session_id = f"live_{uuid.uuid4().hex}"
-    temp_dir = tempfile.gettempdir()
-    temp_path = os.path.join(temp_dir, f"{session_id}.webm")
+    transcriber = StreamingTranscriber(model=model, device=device)
+    finalized_sentences = []
     
-    # Open / initialize empty file
-    with open(temp_path, "wb") as f:
-        pass
-        
-    accumulated_transcript = ""
-    last_analysis_time = 0.0
+    loop = asyncio.get_event_loop()
+    is_transcribing = False
+    last_partial_time = 0.0
     
     try:
         while True:
-            # Receive either binary audio data or control text messages
-            message = await websocket.receive()
+            try:
+                message = await websocket.receive()
+            except asyncio.CancelledError:
+                logger.info("WebSocket task cancelled due to server shutdown.")
+                break
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected during receive.")
+                break
+            except Exception as e:
+                logger.warning(f"Error receiving websocket message: {e}")
+                break
             
             if "bytes" in message:
-                audio_data = message["bytes"]
-                if len(audio_data) > 0:
-                    # Overwrite temp file with the complete audio blob
-                    with open(temp_path, "wb") as f:
-                        f.write(audio_data)
+                audio_bytes = message["bytes"]
+                if len(audio_bytes) > 0:
+                    # Convert raw Float32 PCM audio bytes
+                    chunk = np.frombuffer(audio_bytes, dtype=np.float32)
+                    transcriber.add_audio(chunk)
                     
-                    # Run STT transcription in a thread pool to avoid blocking ASGI loop
-                    try:
-                        loop = asyncio.get_event_loop()
-                        # Run transcribe_audio in the default executor
-                        stt_res = await loop.run_in_executor(
-                            None, transcribe_audio, temp_path
-                        )
-                        new_transcript = stt_res.get("transcript", "").strip()
-                        logger.info(f"STT Live Transcribed segment: '{new_transcript}'")
+                    if transcriber.should_finalize():
+                        # Wait if a partial transcription is active, or run finalized transcription
+                        try:
+                            _, text = await loop.run_in_executor(None, lambda: transcriber.transcribe(is_final=True))
+                        except asyncio.CancelledError:
+                            logger.info("Final transcription task cancelled due to shutdown.")
+                            break
                         
-                        if new_transcript:
-                            # Send live transcript segment update to client immediately
-                            try:
-                                await websocket.send_json({
-                                    "type": "transcript",
-                                    "text": new_transcript
-                                })
-                            except RuntimeError:
-                                logger.info("Client disconnected while sending transcript segment.")
-                                break
-
-                            # Accumulate context
-                            if accumulated_transcript:
-                                accumulated_transcript += " " + new_transcript
-                            else:
-                                accumulated_transcript = new_transcript
+                        if text:
+                            # Save final sentence segment
+                            finalized_sentences.append(text)
+                            if websocket.client_state == WebSocketState.CONNECTED:
+                                try:
+                                    await websocket.send_json({
+                                        "type": "final",
+                                        "text": text
+                                    })
+                                except Exception:
+                                    pass
                             
-                            # Run AI Scam analysis, throttled to every 3 seconds on accumulated text
-                            current_time = time.time()
-                            if current_time - last_analysis_time >= 3.0:
-                                last_analysis_time = current_time
-                                # Perform forensic scanning on the whole context
-                                ai_res = await run_live_scam_analysis(accumulated_transcript)
-                                
-                                # Send risk reports updates back to client with flat schema
+                            # Perform full scam analysis on the whole accumulated transcript
+                            full_transcript = " ".join(finalized_sentences).strip()
+                            ai_res = await run_live_scam_analysis(full_transcript)
+                            
+                            if websocket.client_state == WebSocketState.CONNECTED:
                                 try:
                                     await websocket.send_json({
                                         "type": "analysis",
@@ -485,19 +625,58 @@ async def live_call_websocket(websocket: WebSocket, case_id: Optional[str] = Non
                                         "recommendation": ai_res["recommendation"],
                                         "reason": ai_res["reasoning"]
                                     })
-                                except RuntimeError:
-                                    logger.info("Client disconnected while sending analysis.")
-                                    break
-                                
-                                # Save threat assessment details to MongoDB Atlas
-                                try:
-                                    save_live_analysis_to_db(session_id, accumulated_transcript, ai_res)
-                                except Exception as db_err:
-                                    logger.warning(f"Failed to save live scan to DB: {db_err}")
-                                    
-                    except Exception as stt_err:
-                        logger.error("Error in STT live transcription:", exc_info=True)
+                                except Exception:
+                                    pass
+                            
+                            try:
+                                save_live_analysis_to_db(session_id, full_transcript, ai_res, case_id)
+                            except Exception as db_err:
+                                logger.warning(f"Failed to save live scan: {db_err}")
                         
+                        transcriber.clear_buffer()
+                    else:
+                        # Throttle partials and avoid concurrent overlaps
+                        current_time = time.time()
+                        throttle = 0.3 if transcriber.device == "cuda" else 0.2
+                        if not is_transcribing and (current_time - last_partial_time >= throttle):
+                            last_partial_time = current_time
+                            if len(transcriber.audio_buffer) > 0:
+                                
+                                async def process_partial():
+                                    nonlocal is_transcribing
+                                    is_transcribing = True
+                                    try:
+                                        final_t, partial_t = await loop.run_in_executor(
+                                            None, lambda: transcriber.transcribe(is_final=False)
+                                        )
+                                        if websocket.client_state == WebSocketState.CONNECTED:
+                                            # Send finalized segment if any
+                                            if final_t:
+                                                finalized_sentences.append(final_t)
+                                                try:
+                                                    await websocket.send_json({
+                                                        "type": "final",
+                                                        "text": final_t
+                                                    })
+                                                except Exception:
+                                                    pass
+                                            
+                                            # Send partial segment
+                                            try:
+                                                await websocket.send_json({
+                                                    "type": "partial",
+                                                    "text": partial_t
+                                                })
+                                            except Exception:
+                                                pass
+                                    except asyncio.CancelledError:
+                                        pass
+                                    finally:
+                                        is_transcribing = False
+                                
+                                # Launch task in background to keep websocket receive loop running at full speed!
+                                asyncio.create_task(process_partial())
+                                
             elif "text" in message:
                 text_msg = message["text"]
                 if text_msg == "STOP":
@@ -506,16 +685,11 @@ async def live_call_websocket(websocket: WebSocket, case_id: Optional[str] = Non
                     
     except WebSocketDisconnect:
         logger.info("Live Call Detector WebSocket disconnected.")
+    except asyncio.CancelledError:
+        logger.info("Live Call Detector WebSocket task cancelled cleanly.")
     except Exception as e:
-        logger.error(f"Live WebSocket connection exception: {e}")
-    finally:
-        # Clean up the temporary audio file
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-                logger.info(f"Cleaned up live session audio file: {temp_path}")
-            except Exception as clean_err:
-                logger.error(f"Failed to delete live audio file: {clean_err}")
+        logger.error(f"Live WebSocket error: {e}")
+
 
 
 async def run_live_scam_analysis(transcript: str) -> dict:
@@ -566,7 +740,7 @@ async def run_live_scam_analysis(transcript: str) -> dict:
     }
 
 
-def save_live_analysis_to_db(session_id: str, transcript: str, ai_res: dict) -> None:
+def save_live_analysis_to_db(session_id: str, transcript: str, ai_res: dict, case_id: Optional[str] = None) -> None:
     """Stores live analysis details to live_call_analysis and unified investigations."""
     from database import get_db
     db = get_db()

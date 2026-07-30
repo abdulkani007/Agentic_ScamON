@@ -393,7 +393,9 @@ async def analyze_website(
         confidence_rating=ai_reasoning["confidence_rating"],
         final_decision=ai_reasoning["final_decision"],
         reasoning_steps=ai_reasoning["reasoning_steps"],
-        recommended_action=ai_reasoning["recommended_action"]
+        recommended_action=ai_reasoning["recommended_action"],
+        trust_indicators=ai_reasoning.get("trust_indicators") or verdict.get("trust_indicators", []),
+        risk_indicators=ai_reasoning.get("risk_indicators") or verdict.get("risk_indicators", [])
     )
 
     # Resolve block metadata if domain is blocked
@@ -418,6 +420,7 @@ async def analyze_website(
     response_payload = WebsiteAnalysisResponse(
         source=source_type,
         url=normalized,
+        trust_score=verdict.get("trust_score", 0),
         risk_score=risk_score,
         confidence=ai_reasoning["confidence_rating"],
         threat_type=risk_res["threat_type"],

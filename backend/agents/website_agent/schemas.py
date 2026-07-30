@@ -49,6 +49,8 @@ class AIReasoningDetails(BaseModel):
     final_decision: str = Field(..., description="The final risk rating verdict.")
     reasoning_steps: List[str] = Field(..., description="Explainable threat indicators.")
     recommended_action: str = Field(..., description="The recommended action strategy.")
+    trust_indicators: List[str] = Field(default_factory=list, description="Verified trust signals.")
+    risk_indicators: List[str] = Field(default_factory=list, description="Verified threat signals.")
 
 
 class MemoryHistoryDetails(BaseModel):
@@ -79,6 +81,7 @@ class WebsiteAnalysisResponse(BaseModel):
         ..., description="The check entrypoint mode ('URL' or 'QR')."
     )
     url: str = Field(..., description="The evaluated URL.")
+    trust_score: int = Field(default=0, description="Overall trust rating score.")
     risk_score: int = Field(..., description="Scam probability score from 0 to 100.")
     confidence: int = Field(..., description="Analysis confidence rating (0 to 100).")
     threat_type: str = Field(..., description="The classified threat category of the domain.")

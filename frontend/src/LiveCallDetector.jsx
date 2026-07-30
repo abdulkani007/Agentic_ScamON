@@ -6,7 +6,8 @@ export default function LiveCallDetector() {
   const [isListening, setIsListening] = useState(false);
   const [timer, setTimer] = useState(0);
   const [micStatus, setMicStatus] = useState('STANDBY');
-  const [transcript, setTranscript] = useState('');
+  const [finalizedSentences, setFinalizedSentences] = useState([]);
+  const [partialTranscript, setPartialTranscript] = useState('');
   
   // AI analysis states
   const [analysis, setAnalysis] = useState({
@@ -18,12 +19,11 @@ export default function LiveCallDetector() {
   });
 
   const wsRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const processorRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const soundIntervalRef = useRef(null);
   const transcriptEndRef = useRef(null);
-  const chunksRef = useRef([]);
-  const recordingIntervalRef = useRef(null);
   const streamRef = useRef(null);
 
   // Auto-scroll transcript panel
@@ -31,7 +31,7 @@ export default function LiveCallDetector() {
     if (transcriptEndRef.current) {
       transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [transcript]);
+  }, [finalizedSentences, partialTranscript]);
 
   // Audio timer handler
   useEffect(() => {
@@ -49,7 +49,6 @@ export default function LiveCallDetector() {
   // High risk alarm sound trigger
   useEffect(() => {
     if (isListening && analysis.risk_score > 70) {
-      // Play alarm beep every 2 seconds
       soundIntervalRef.current = setInterval(() => {
         playWarningBeep();
       }, 2000);
@@ -86,7 +85,7 @@ export default function LiveCallDetector() {
 
   const startListening = async () => {
     try {
-      setMicStatus('REQUESTING PERMISSION...');
+      setMicStatus('🎙 Listening...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
@@ -97,71 +96,49 @@ export default function LiveCallDetector() {
       ws.onopen = () => {
         console.log("WebSocket connection opened successfully.");
         setIsListening(true);
-        setMicStatus('LISTENING...');
-        setTranscript('Connection established. Capturing audio from microphone...\n');
-        chunksRef.current = [];
+        setMicStatus('🎙 Listening...');
+        setFinalizedSentences([]);
+        setPartialTranscript('');
 
-        // Start recursive 3-second segment recording sequence
-        const recordNextChunk = () => {
-          if (!streamRef.current || ws.readyState !== WebSocket.OPEN) return;
-
-          const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
-          const localChunks = [];
-
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-              localChunks.push(event.data);
+        // Initialize AudioContext to capture microphone buffers
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+          const source = audioCtx.createMediaStreamSource(stream);
+          
+          // Script processor chunk size: 4096 samples (~256ms chunk)
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          
+          processor.onaudioprocess = (e) => {
+            const inputData = e.inputBuffer.getChannelData(0); // Float32Array
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(inputData);
             }
           };
 
-          mediaRecorder.onstop = () => {
-            if (localChunks.length > 0 && ws.readyState === WebSocket.OPEN) {
-              const audioBlob = new Blob(localChunks, { type: 'audio/webm' });
-              console.log("Sending segment audio blob of size:", audioBlob.size);
-              ws.send(audioBlob);
-            }
-          };
-
-          mediaRecorder.start();
-
-          // Stop after 3 seconds to package and send the chunk
-          setTimeout(() => {
-            if (mediaRecorder.state !== 'inactive') {
-              try {
-                mediaRecorder.stop();
-              } catch (e) {}
-            }
-          }, 3000);
-        };
-
-        // Trigger first record sequence
-        recordNextChunk();
-
-        // Repeat recording every 3 seconds
-        recordingIntervalRef.current = setInterval(() => {
-          recordNextChunk();
-        }, 3000);
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+          
+          audioCtxRef.current = audioCtx;
+          processorRef.current = processor;
+        } catch (audioErr) {
+          console.error("Failed to initialize AudioContext:", audioErr);
+          setMicStatus('AUDIO ENGINE ERROR');
+        }
       };
 
       ws.onmessage = (event) => {
-        console.warn("Received:", event.data);
         try {
           const payload = JSON.parse(event.data);
-          console.warn("Parsed payload:", payload);
-          if (payload.type === 'transcript') {
+          if (payload.type === 'partial') {
+            setPartialTranscript(payload.text || '');
             if (payload.text && payload.text.trim()) {
-              setTranscript((previous) => {
-                if (!previous || previous.startsWith('Connection established')) {
-                  return payload.text;
-                }
-                // Check if segment is already at the end of the transcript to prevent duplicate appends
-                const prevLines = previous.split('\n');
-                const lastLine = prevLines[prevLines.length - 1];
-                if (lastLine.trim() === payload.text.trim()) {
-                  return previous;
-                }
-                return previous + '\n' + payload.text;
-              });
+              setMicStatus('🟢 Live');
+            }
+          } else if (payload.type === 'final') {
+            if (payload.text && payload.text.trim()) {
+              setFinalizedSentences((prev) => [...prev, payload.text]);
+              setPartialTranscript('');
             }
           } else if (payload.type === 'analysis') {
             setAnalysis({
@@ -200,19 +177,20 @@ export default function LiveCallDetector() {
     setIsListening(false);
     setMicStatus('STANDBY');
     
-    // Clear chunk interval timers
-    if (recordingIntervalRef.current) {
-      clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = null;
-    }
-    
-    // Stop recording
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    // Stop Script Processor and AudioContext cleanly
+    if (processorRef.current) {
       try {
-        mediaRecorderRef.current.stop();
+        processorRef.current.disconnect();
       } catch (e) {}
+      processorRef.current = null;
     }
-    mediaRecorderRef.current = null;
+
+    if (audioCtxRef.current) {
+      try {
+        audioCtxRef.current.close();
+      } catch (e) {}
+      audioCtxRef.current = null;
+    }
 
     if (streamRef.current) {
       try {
@@ -449,7 +427,33 @@ export default function LiveCallDetector() {
                   marginTop: '12px'
                 }}
               >
-                {transcript || "Waiting for audio feed to transcribe conversation text..."}
+                <div style={{ display: 'inline', color: '#fff' }}>
+                  {finalizedSentences.map((sentence, idx) => (
+                    <span key={idx} style={{ display: 'block', marginBottom: '8px', color: '#fff' }}>
+                      {sentence}
+                    </span>
+                  ))}
+                  {partialTranscript && (
+                    <span style={{ color: '#aaa', fontStyle: 'italic' }}>
+                      {partialTranscript}
+                    </span>
+                  )}
+                  {isListening && (
+                    <span className="blinking-cursor" style={{ 
+                      display: 'inline-block',
+                      width: '6px',
+                      height: '12px',
+                      backgroundColor: '#00E676',
+                      marginLeft: '4px',
+                      animation: 'blink 1s step-end infinite'
+                    }}></span>
+                  )}
+                  {!finalizedSentences.length && !partialTranscript && (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      Waiting for audio feed to transcribe conversation text...
+                    </span>
+                  )}
+                </div>
                 <div ref={transcriptEndRef} />
               </div>
             </div>

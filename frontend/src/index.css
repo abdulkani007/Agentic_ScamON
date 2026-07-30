@@ -68,6 +68,21 @@ body::before {
   box-shadow: var(--accent-green-glow);
 }
 
+/* SOC Sidebar Scrollbar styling */
+.soc-sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.soc-sidebar-scroll::-webkit-scrollbar-track {
+  background: rgba(2, 3, 5, 0.3);
+}
+.soc-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 230, 118, 0.15);
+  border-radius: 2px;
+}
+.soc-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #00E676;
+}
+
 /* Layout Setup */
 .app-container {
   display: flex;
@@ -939,6 +954,12 @@ body::before {
 .assistant-typing-dots span:nth-child(1) { animation-delay: -0.32s; }
 .assistant-typing-dots span:nth-child(2) { animation-delay: -0.16s; }
 
+/* Master Agent Pipeline Spark Animation */
+@keyframes pipelineRun {
+  0% { left: -40px; }
+  100% { left: 100%; }
+}
+
 @keyframes assistant-dot-bounce {
   0%, 80%, 100% { transform: scale(0); }
   40% { transform: scale(1); }
@@ -952,4 +973,85 @@ body::before {
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlowTarget {
+  0% {
+    box-shadow: 0 0 5px rgba(0, 230, 118, 0.2);
+    border-color: rgba(0, 230, 118, 0.2);
+    background: rgba(0, 230, 118, 0.02);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(0, 230, 118, 0.85), inset 0 0 10px rgba(0, 230, 118, 0.3);
+    border-color: #00E676;
+    background: rgba(0, 230, 118, 0.15);
+    color: #00E676;
+  }
+  100% {
+    box-shadow: 0 0 5px rgba(0, 230, 118, 0.2);
+    border-color: rgba(0, 230, 118, 0.2);
+    background: rgba(0, 230, 118, 0.02);
+  }
+}
+
+.routing-target-pulse {
+  animation: pulseGlowTarget 1s infinite ease-in-out !important;
+  border-left: 3px solid #00E676 !important;
+}
+
+/* Cinematic Page transitions (Scale, Blur, Fade) */
+.cinematic-transition {
+  filter: blur(5px) brightness(0.7);
+  transform: scale(0.985);
+  opacity: 0.35;
+  transition: filter 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+              transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Page entrance animations */
+@keyframes fadeInZoom {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+.content-area > div, 
+.content-area > main,
+.content-area > section,
+.content-area > form {
+  animation: fadeInZoom 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+/* Glow Pulse Active Button */
+@keyframes glowPulseButton {
+  0% {
+    box-shadow: 0 0 5px rgba(0, 230, 118, 0.4);
+    transform: scale(1);
+    border-color: rgba(0, 230, 118, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 230, 118, 0.8), 0 0 30px rgba(0, 230, 118, 0.4);
+    transform: scale(1.02);
+    border-color: #00E676;
+    background-color: rgba(0, 230, 118, 0.25) !important;
+  }
+  100% {
+    box-shadow: 0 0 5px rgba(0, 230, 118, 0.4);
+    transform: scale(1);
+    border-color: rgba(0, 230, 118, 0.4);
+  }
+}
+
+.glow-pulse-active {
+  animation: glowPulseButton 1.4s infinite ease-in-out !important;
+  position: relative;
+  overflow: hidden;
 }

@@ -303,127 +303,242 @@ def seed_investigations_history(db) -> None:
 
 
 def seed_cases_history(db) -> None:
-    """Seeds the cases collection with realistic Case Folder history logs if empty."""
+    """Seeds the cases collection with realistic Case Folder history logs."""
     try:
-        if db["cases"].count_documents({"case_id": {"$exists": True}}) == 0:
-            db["cases"].insert_many([
-                {
-                    "case_id": "SCAMON-2026-000001",
-                    "user_id": "default_user",
-                    "created_at": "2026-07-28 12:45:00 UTC",
-                    "updated_at": "2026-07-28 16:15:00 UTC",
-                    "status": "Closed",
-                    "overall_risk_score": 82,
-                    "overall_threat_level": "HIGH",
-                    "agents_used": ["website", "threat_correlation"],
-                    "evidence": {
-                        "website": {
-                            "agent_source": "website",
-                            "generated_by": "Website Investigation Agent",
-                            "creation_time": "2026-07-28 12:45:00 UTC",
-                            "last_modified_time": "2026-07-28 12:45:00 UTC",
-                            "integrity_hash": "2024ff001c29bb201f8d485747063de2",
-                            "data": {
-                                "url": "https://secure-login-bank.com",
-                                "domain": "secure-login-bank.com",
-                                "risk_score": 82,
-                                "verdict": "SUSPICIOUS",
-                                "ssl": {"valid": True, "issuer": "Let's Encrypt"},
-                                "domain_age": 12
-                            }
-                        },
-                        "threat_correlation": {
-                            "agent_source": "threat_correlation",
-                            "generated_by": "Threat Correlation Agent",
-                            "creation_time": "2026-07-28 16:15:00 UTC",
-                            "last_modified_time": "2026-07-28 16:15:00 UTC",
-                            "integrity_hash": "993deff8812c29bc119b48574a0088cc",
-                            "data": {
-                                "campaign_name": "Targeted Bank Spoofing",
-                                "correlated_domains": ["paypal-update.com", "secure-login-bank.com"],
-                                "shared_registrar": "NameCheap",
-                                "ip_subnet": "192.168.4.0/24"
-                            }
-                        }
-                    },
-                    "reports": {}
-                },
-                {
-                    "case_id": "SCAMON-2026-000002",
-                    "user_id": "default_user",
-                    "created_at": "2026-07-29 13:45:00 UTC",
-                    "updated_at": "2026-07-29 14:15:32 UTC",
-                    "status": "Analysis Completed",
-                    "overall_risk_score": 96,
-                    "overall_threat_level": "CRITICAL",
-                    "agents_used": ["website", "email"],
-                    "evidence": {
-                        "website": {
-                            "agent_source": "website",
-                            "generated_by": "Website Investigation Agent",
-                            "creation_time": "2026-07-29 14:15:32 UTC",
-                            "last_modified_time": "2026-07-29 14:15:32 UTC",
-                            "integrity_hash": "1111ff001c29bb201f8d485747063de2",
-                            "data": {
-                                "url": "https://secure-login-bank.com",
-                                "domain": "secure-login-bank.com",
-                                "risk_score": 96,
-                                "verdict": "PHISHING",
-                                "ssl": {"valid": False, "issuer": "Let's Encrypt"},
-                                "domain_age": 12
-                            }
-                        },
-                        "email": {
-                            "agent_source": "email",
-                            "generated_by": "Email Investigation Agent",
-                            "creation_time": "2026-07-29 13:45:10 UTC",
-                            "last_modified_time": "2026-07-29 13:45:10 UTC",
-                            "integrity_hash": "8888deff8812c29bc119b48574a0088cc",
-                            "data": {
-                                "subject": "Urgent Action Required",
-                                "sender": "security-alert@paypal-update.com",
-                                "headers_analysis": {"spf": "FAIL", "dkim": "PASS", "dmarc": "FAIL"}
+        # Always delete the old default seed cases first to make sure they get updated
+        db["cases"].delete_many({"case_id": {"$in": ["SCAMON-2026-000001", "SCAMON-2026-000002", "SCAMON-2026-000003"]}})
+        db["cases"].insert_many([
+            {
+                "case_id": "SCAMON-2026-000001",
+                "user_id": "default_user",
+                "created_at": "2026-07-28 12:45:00 UTC",
+                "updated_at": "2026-07-28 16:15:00 UTC",
+                "status": "Closed",
+                "overall_risk_score": 82,
+                "overall_threat_level": "HIGH",
+                "agents_used": ["website", "threat_correlation"],
+                "evidence": {
+                    "website": {
+                        "agent_source": "website",
+                        "generated_by": "Website Investigation Agent",
+                        "creation_time": "2026-07-28 12:45:00 UTC",
+                        "last_modified_time": "2026-07-28 12:45:00 UTC",
+                        "integrity_hash": "2024ff001c29bb201f8d485747063de2",
+                        "data": {
+                            "url": "https://secure-login-bank.com",
+                            "domain": {
+                                "name": "secure-login-bank.com",
+                                "age_days": 12,
+                                "registrar": "NameCheap"
+                            },
+                            "risk_score": 82,
+                            "trust_score": 18,
+                            "verdict": "SUSPICIOUS",
+                            "ssl": {"valid": True, "issuer": "Let's Encrypt", "expiry": "2026-10-28"},
+                            "investigation_id": "550e8400-e29b-41d4-a716-446655440000",
+                            "timestamp": "2026-07-28 12:45:00 UTC",
+                            "ai_reasoning": {
+                                "summary": "This site is a typosquatted version of secure-login-bank.com registered recently.",
+                                "threat_category": "Suspicious Login Portal",
+                                "confidence_rating": 85,
+                                "final_decision": "SUSPICIOUS",
+                                "recommended_action": "Block Access immediately",
+                                "trust_indicators": ["✔ SSL Certificate is Valid"],
+                                "risk_indicators": ["⚠ Typosquatted Domain detected", "⚠ Registration date < 30 days ago"]
+                            },
+                            "memory_history": {
+                                "has_history": False
+                            },
+                            "redirect_history": ["https://secure-login-bank.com"],
+                            "security_headers": {
+                                "Content-Security-Policy": "missing",
+                                "X-Frame-Options": "missing"
+                            },
+                            "html_metadata": {
+                                "title": "Secure Bank Login",
+                                "description": "Log in to your secure banking portal.",
+                                "keywords": "login, bank, secure"
                             }
                         }
                     },
-                    "reports": {
-                        "xai_summary": {
-                            "overall_summary": "Synthesized critical security alert on credential harvesting vectors.",
-                            "overall_risk": {"risk_score": 96, "threat_level": "CRITICAL", "confidence": 95},
-                            "findings": {"website": ["Newly registered typosquatted domain."], "email": ["SPF configuration failed."]}
+                    "threat_correlation": {
+                        "agent_source": "threat_correlation",
+                        "generated_by": "Threat Correlation Agent",
+                        "creation_time": "2026-07-28 16:15:00 UTC",
+                        "last_modified_time": "2026-07-28 16:15:00 UTC",
+                        "integrity_hash": "993deff8812c29bc119b48574a0088cc",
+                        "data": {
+                            "campaign_name": "Targeted Bank Spoofing",
+                            "correlated_domains": ["paypal-update.com", "secure-login-bank.com"],
+                            "shared_registrar": "NameCheap",
+                            "ip_subnet": "192.168.4.0/24"
                         }
                     }
                 },
-                {
-                    "case_id": "SCAMON-2026-000003",
-                    "user_id": "default_user",
-                    "created_at": "2026-07-29 14:30:00 UTC",
-                    "updated_at": "2026-07-29 14:30:00 UTC",
-                    "status": "Investigating",
-                    "overall_risk_score": 12,
-                    "overall_threat_level": "SAFE",
-                    "agents_used": ["website"],
-                    "evidence": {
-                        "website": {
-                            "agent_source": "website",
-                            "generated_by": "Website Investigation Agent",
-                            "creation_time": "2026-07-29 14:30:00 UTC",
-                            "last_modified_time": "2026-07-29 14:30:00 UTC",
-                            "integrity_hash": "2222ff001c29bb201f8d485747063de2",
-                            "data": {
-                                "url": "https://google.com",
-                                "domain": "google.com",
-                                "risk_score": 12,
-                                "verdict": "SAFE",
-                                "ssl": {"valid": True, "issuer": "Google Trust Services"},
-                                "domain_age": 10250
+                "reports": {}
+            },
+            {
+                "case_id": "SCAMON-2026-000002",
+                "user_id": "default_user",
+                "created_at": "2026-07-29 13:45:00 UTC",
+                "updated_at": "2026-07-29 14:15:32 UTC",
+                "status": "Analysis Completed",
+                "overall_risk_score": 96,
+                "overall_threat_level": "CRITICAL",
+                "agents_used": ["website", "email"],
+                "evidence": {
+                    "website": {
+                        "agent_source": "website",
+                        "generated_by": "Website Investigation Agent",
+                        "creation_time": "2026-07-29 14:15:32 UTC",
+                        "last_modified_time": "2026-07-29 14:15:32 UTC",
+                        "integrity_hash": "1111ff001c29bb201f8d485747063de2",
+                        "data": {
+                            "url": "https://secure-login-bank.com",
+                            "domain": {
+                                "name": "secure-login-bank.com",
+                                "age_days": 12,
+                                "registrar": "NameCheap"
+                            },
+                            "risk_score": 96,
+                            "trust_score": 4,
+                            "verdict": "PHISHING",
+                            "ssl": {"valid": False, "issuer": "Let's Encrypt", "expiry": "2026-10-28"},
+                            "investigation_id": "550e8400-e29b-41d4-a716-446655440002",
+                            "timestamp": "2026-07-29 14:15:32 UTC",
+                            "ai_reasoning": {
+                                "summary": "Highly dangerous typosquatted banking clone domain with an invalid SSL certificate.",
+                                "threat_category": "Phishing Link",
+                                "confidence_rating": 98,
+                                "final_decision": "PHISHING",
+                                "recommended_action": "BLOCK WEBSITE",
+                                "trust_indicators": [],
+                                "risk_indicators": ["❌ Invalid SSL certificate", "❌ Domain typosquatting detected"]
+                            },
+                            "memory_history": {
+                                "has_history": False
+                            },
+                            "redirect_history": ["https://secure-login-bank.com"],
+                            "security_headers": {
+                                "Content-Security-Policy": "missing",
+                                "X-Frame-Options": "missing"
+                            },
+                            "html_metadata": {
+                                "title": "Secure Bank Login",
+                                "description": "Log in to your secure banking portal.",
+                                "keywords": "login, bank, secure"
                             }
                         }
                     },
-                    "reports": {}
+                    "email": {
+                        "agent_source": "email",
+                        "generated_by": "Email Investigation Agent",
+                        "creation_time": "2026-07-29 13:45:10 UTC",
+                        "last_modified_time": "2026-07-29 13:45:10 UTC",
+                        "integrity_hash": "8888deff8812c29bc119b48574a0088cc",
+                        "data": {
+                            "message_id": "c2b3e4f5-a7b8-c9d0-e1f2-3456789abcde",
+                            "subject": "Urgent Action Required",
+                            "sender": "security-alert@paypal-update.com",
+                            "receiver": "user@example.com",
+                            "date": "2026-07-29 13:45:10 UTC",
+                            "risk_score": 96,
+                            "threat_level": "CRITICAL",
+                            "llm_classification": "PHISHING",
+                            "llm_reasoning": "The email uses urgent language and spoofed PayPal sender domains with failing SPF and DMARC alignments.",
+                            "headers_analysis": {
+                                "spf": "fail",
+                                "dkim": "pass",
+                                "dmarc": "fail",
+                                "mismatch_from_return_path": True,
+                                "mismatch_from_reply_to": True,
+                                "received_hops": 3
+                            },
+                            "domain_reputation": {
+                                "domain": "paypal-update.com",
+                                "age_days": 5,
+                                "registrar": "NameCheap",
+                                "valid_ssl": False,
+                                "has_mx_records": False
+                            },
+                            "links_analysis": [
+                                {
+                                    "url": "https://secure-login-bank.com",
+                                    "domain": "secure-login-bank.com",
+                                    "risk_score": 96,
+                                    "decision": "PHISHING"
+                                }
+                            ],
+                            "attachments_analysis": []
+                        }
+                    }
+                },
+                "reports": {
+                    "xai_summary": {
+                        "overall_summary": "Synthesized critical security alert on credential harvesting vectors.",
+                        "overall_risk": {"risk_score": 96, "threat_level": "CRITICAL", "confidence": 95},
+                        "findings": {"website": ["Newly registered typosquatted domain."], "email": ["SPF configuration failed."]}
+                    }
                 }
-            ])
-            logger.info("Seeded cases history collection.")
+            },
+            {
+                "case_id": "SCAMON-2026-000003",
+                "user_id": "default_user",
+                "created_at": "2026-07-29 14:30:00 UTC",
+                "updated_at": "2026-07-29 14:30:00 UTC",
+                "status": "Investigating",
+                "overall_risk_score": 12,
+                "overall_threat_level": "SAFE",
+                "agents_used": ["website"],
+                "evidence": {
+                    "website": {
+                        "agent_source": "website",
+                        "generated_by": "Website Investigation Agent",
+                        "creation_time": "2026-07-29 14:30:00 UTC",
+                        "last_modified_time": "2026-07-29 14:30:00 UTC",
+                        "integrity_hash": "2222ff001c29bb201f8d485747063de2",
+                        "data": {
+                            "url": "https://google.com",
+                            "domain": {
+                                "name": "google.com",
+                                "age_days": 10250,
+                                "registrar": "MarkMonitor Inc."
+                            },
+                            "risk_score": 12,
+                            "trust_score": 99,
+                            "verdict": "SAFE",
+                            "ssl": {"valid": True, "issuer": "Google Trust Services", "expiry": "2027-01-01"},
+                            "investigation_id": "770e8400-e29b-41d4-a716-446655440001",
+                            "timestamp": "2026-07-29 14:30:00 UTC",
+                            "ai_reasoning": {
+                                "summary": "This is the official domain of Google, a highly trusted service provider.",
+                                "threat_category": "None (Legitimate Service)",
+                                "confidence_rating": 99,
+                                "final_decision": "SAFE",
+                                "recommended_action": "No action needed.",
+                                "trust_indicators": ["✔ High domain age", "✔ Valid SSL", "✔ Top-tier Alexa rank"],
+                                "risk_indicators": []
+                            },
+                            "memory_history": {
+                                "has_history": False
+                            },
+                            "redirect_history": ["https://google.com"],
+                            "security_headers": {
+                                "Content-Security-Policy": "secured",
+                                "X-Frame-Options": "secured"
+                            },
+                            "html_metadata": {
+                                "title": "Google",
+                                "description": "Search the world's information, including webpages, images, videos and more.",
+                                "keywords": "google, search, engine"
+                            }
+                        }
+                    }
+                },
+                "reports": {}
+            }
+        ])
+        logger.info("Seeded cases history collection.")
     except Exception as e:
         logger.warning(f"Failed to seed cases history mock records: {e}")
 

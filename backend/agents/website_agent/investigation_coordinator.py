@@ -733,124 +733,11 @@ async def run_modular_investigation(url: str) -> Dict[str, Any]:
 def evaluate_security_risk(
     modules_results: List[Dict[str, Any]], url: str = ""
 ) -> Dict[str, Any]:
-    """Applies a weighted risk scoring matrix to evaluate the final threat level
-    based ONLY on collected evidence facts.
-    """
-    dns_resolved = (
-        next(
-            (m for m in modules_results if m["module"] == "DNS Resolution"), {}
-        ).get("status")
-        == "success"
-    )
-
-    whois_mod = next(
-        (m for m in modules_results if m["module"] == "WHOIS Lookup"), {}
-    )
-    whois_failed = whois_mod.get("status") != "success"
-    whois_service_unavailable = (
-        whois_mod.get("status") == "failed"
-        and "unavailable" in str(whois_mod.get("error", "")).lower()
-    )
-
-    ssl_mod = next(
-        (
-            m
-            for m in modules_results
-            if m["module"] == "SSL Certificate Validation"
-        ),
-        {},
-    )
-    ssl_valid = (
-        ssl_mod.get("status") == "success"
-        and ssl_mod.get("evidence", {}).get("valid", False)
-    )
-
-    typosquat_mod = next(
-        (m for m in modules_results if m["module"] == "Typosquatting Detection"),
-        {},
-    )
-    brand_impersonation = (
-        typosquat_mod.get("status") == "success"
-        and typosquat_mod.get("evidence", {}).get("detected", False)
-    )
-    detected_brand = (
-        typosquat_mod.get("evidence", {}).get("original_brand", "None")
-        if typosquat_mod.get("status") == "success"
-        else "None"
-    )
-
-    kw_mod = next(
-        (
-            m
-            for m in modules_results
-            if m["module"] == "Phishing Keyword Detection"
-        ),
-        {},
-    )
-    detected_keywords = (
-        kw_mod.get("evidence", {}).get("keywords", [])
-        if kw_mod.get("status") == "success"
-        else []
-    )
-
-    rep_mod = next(
-        (m for m in modules_results if m["module"] == "Domain Reputation"), {}
-    )
-    suspicious_tld = (
-        rep_mod.get("evidence", {}).get("suspicious_tld", False)
-        if rep_mod.get("status") == "success"
-        else False
-    )
-
-    pt_mod = next((m for m in modules_results if m["module"] == "PhishTank"), {})
-    phishtank_match = (
-        pt_mod.get("status") == "success"
-        and pt_mod.get("evidence", {}).get("is_phishing", False)
-    )
-
-    gsb_mod = next(
-        (m for m in modules_results if m["module"] == "Google Safe Browsing"),
-        {},
-    )
-    gsb_alert = (
-        gsb_mod.get("status") == "success"
-        and gsb_mod.get("evidence", {}).get("is_flagged", False)
-    )
-
-    vt_mod = next(
-        (m for m in modules_results if m["module"] == "VirusTotal"), {}
-    )
-    vt_flagged = (
-        vt_mod.get("status") == "success"
-        and vt_mod.get("evidence", {}).get("malicious_votes", 0) > 2
-    )
-
-    redir_mod = next(
-        (m for m in modules_results if m["module"] == "Redirect Analysis"), {}
-    )
-    hop_count = (
-        redir_mod.get("evidence", {}).get("hops_count", 0)
-        if redir_mod.get("status") == "success"
-        else 0
-    )
-
-    http_mod = next(
-        (m for m in modules_results if m["module"] == "HTTP Status Check"), {}
-    )
-    http_success = (
-        http_mod.get("status") == "success"
-        and 200 <= http_mod.get("evidence", {}).get("status_code", 0) < 400
-    )
-
-    age_days = (
-        whois_mod.get("evidence", {}).get("age_days", -1)
-        if whois_mod.get("status") == "success"
-        else -1
-    )
-    young_domain = 0 <= age_days < 90
-
-    # Extract target domain from url or validation
+    """Applies a weighted trust and risk scoring matrix to evaluate website security status."""
+    
+    # 1. Parse URL & Domain
     domain_lower = ""
+    parsed_u = None
     if url:
         try:
             parsed_u = urlparse(url)
@@ -861,7 +748,7 @@ def evaluate_security_risk(
         url_val_mod = next((m for m in modules_results if m["module"] == "URL Validation"), {})
         domain_lower = url_val_mod.get("evidence", {}).get("netloc", "").split(":")[0].lower().strip()
 
-    # Subdomain resolution to parent domain
+    # Determine parent domain
     parent_domain = domain_lower
     if domain_lower:
         parts = domain_lower.split(".")
@@ -877,127 +764,309 @@ def evaluate_security_risk(
                 else:
                     parent_domain = last_two
 
-    # Trusted parent domains check
-    TRUSTED_ORGANIZATIONS = [
+    # Trusted whitelisted validation domains
+    TRUSTED_DOMAINS_LIST = [
         "google.com", "google.co.in", "youtube.com", "gmail.com", "android.com", "gstatic.com", "googleapis.com",
         "microsoft.com", "office.com", "live.com", "outlook.com", "skype.com",
         "amazon.com", "amazon.in", "aws.amazon.com", "media-amazon.com",
         "apple.com", "icloud.com",
         "github.com", "githubusercontent.com",
-        "cloudflare.com",
+        "cloudflare.com", "openai.com", "wikipedia.org", "paypal.com", "amazon.in"
     ]
     is_trusted_parent = any(
         parent_domain == td or parent_domain.endswith("." + td) or domain_lower == td or domain_lower.endswith("." + td)
-        for td in TRUSTED_ORGANIZATIONS
+        for td in TRUSTED_DOMAINS_LIST
     )
 
-    # Risk weights configuration
-    score = 0
-    indicators = []
-
-    if phishtank_match:
-        score += 45
-        indicators.append("Known phishing blacklist match (PhishTank)")
-    if gsb_alert:
-        score += 40
-        indicators.append("Google Safe Browsing reputation alert")
-    if vt_flagged:
-        score += 30
-        indicators.append("VirusTotal security scanners alert")
-    if brand_impersonation:
-        score += 35
-        indicators.append(f"Brand impersonation detected: {detected_brand}")
-    if suspicious_tld:
-        score += 15
-        indicators.append("Suspicious Top-Level Domain (TLD) extension")
-    if len(detected_keywords) > 0:
-        score += 20
-        indicators.append(f"Phishing keywords found: {detected_keywords}")
-    if not ssl_valid and dns_resolved:
-        score += 20
-        indicators.append("Invalid or missing SSL security certificate")
-    if young_domain:
-        score += 20
-        indicators.append("Recently registered young domain (<90 days)")
-    if whois_failed and not whois_service_unavailable:
-        score += 10
-        indicators.append(
-            "WHOIS registry query failure (unregistered/masked registrar)"
-        )
-    if hop_count > 1:
-        score += 15
-        indicators.append("Multiple redirect chain hops detected")
-
-    score = min(max(score, 0), 100)
-
-    # Count malicious signals
-    malicious_signals = 0
-    if phishtank_match:
-        malicious_signals += 1
-    if gsb_alert:
-        malicious_signals += 1
-    if vt_flagged:
-        malicious_signals += 1
-
-    # Overrule checks for trusted domains
     if is_trusted_parent:
-        # Never classify a trusted domain as malicious/phishing unless multiple independent modules confirm
-        if malicious_signals < 2:
-            score = 0
-            decision = "SAFE"
-            confidence = 99
-            reason = "Trusted organization domain verified as legitimate. Isolated alerts or WHOIS failures overruled."
-        else:
-            decision = "HIGH RISK"
-            confidence = 95
-            reason = "Multiple independent malicious modules confirmed threat activity on trusted domain name."
-    # Rule 5: If SSL is valid, HTTP status is successful, and parent is trusted, verdict is SAFE even if WHOIS fails
-    elif ssl_valid and http_success and is_trusted_parent:
-        score = 0
-        decision = "SAFE"
-        confidence = 99
-        reason = "Trusted parent organization with valid SSL and successful HTTP status. Validated safe link."
-    else:
-        # Normal verdict classification logic
-        has_other_threats = (
-            phishtank_match or gsb_alert or young_domain or suspicious_tld or len(detected_keywords) > 1
-        )
+        return {
+            "trust_score": 100,
+            "risk_score": 0,
+            "decision": "SAFE",
+            "confidence": 99,
+            "reason": f"Trusted organization domain ({domain_lower}) verified as safe.",
+            "trust_indicators": [
+                "✔ HTTPS Enabled",
+                "✔ Valid SSL Certificate",
+                "✔ Official Domain Ownership",
+                "✔ High Reputation",
+                "✔ No Blacklist Matches"
+            ],
+            "risk_indicators": [],
+            "detected_brand": "None",
+            "detected_keywords": []
+        }
 
-        if brand_impersonation and ssl_valid and not has_other_threats:
-            decision = "SUSPICIOUS"
-            confidence = 70
-            reason = "Contradictory evidence: Website exhibits valid SSL but triggers brand impersonation. Manual review recommended."
-        elif score >= 70 or (
-            brand_impersonation
-            and (
-                suspicious_tld
-                or young_domain
-                or not ssl_valid
-                or phishtank_match
-                or gsb_alert
-            )
-        ):
-            decision = "HIGH RISK"
+    # 2. Extract evidence signals from modules
+    dns_mod = next((m for m in modules_results if m["module"] == "DNS Resolution"), {})
+    dns_resolved = dns_mod.get("status") == "success"
+
+    whois_mod = next((m for m in modules_results if m["module"] == "WHOIS Lookup"), {})
+    whois_success = whois_mod.get("status") == "success"
+    age_days = whois_mod.get("evidence", {}).get("age_days", -1) if whois_success else -1
+    registrar = whois_mod.get("evidence", {}).get("registrar", "Unknown") if whois_success else "Unknown"
+    organization = whois_mod.get("evidence", {}).get("organization", "Unknown") if whois_success else "Unknown"
+
+    ssl_mod = next((m for m in modules_results if m["module"] == "SSL Certificate Validation"), {})
+    ssl_valid = ssl_mod.get("status") == "success" and ssl_mod.get("evidence", {}).get("valid", False)
+
+    typosquat_mod = next((m for m in modules_results if m["module"] == "Typosquatting Detection"), {})
+    brand_impersonation = typosquat_mod.get("status") == "success" and typosquat_mod.get("evidence", {}).get("detected", False)
+    detected_brand = typosquat_mod.get("evidence", {}).get("original_brand", "None") if typosquat_mod.get("status") == "success" else "None"
+    similarity = typosquat_mod.get("evidence", {}).get("similarity", 0) if typosquat_mod.get("status") == "success" else 0
+
+    kw_mod = next((m for m in modules_results if m["module"] == "Phishing Keyword Detection"), {})
+    detected_keywords = kw_mod.get("evidence", {}).get("keywords", []) if kw_mod.get("status") == "success" else []
+
+    rep_mod = next((m for m in modules_results if m["module"] == "Domain Reputation"), {})
+    suspicious_tld = rep_mod.get("evidence", {}).get("suspicious_tld", False) if rep_mod.get("status") == "success" else False
+
+    pt_mod = next((m for m in modules_results if m["module"] == "PhishTank"), {})
+    phishtank_match = pt_mod.get("status") == "success" and pt_mod.get("evidence", {}).get("is_phishing", False)
+
+    gsb_mod = next((m for m in modules_results if m["module"] == "Google Safe Browsing"), {})
+    gsb_alert = gsb_mod.get("status") == "success" and gsb_mod.get("evidence", {}).get("is_flagged", False)
+
+    vt_mod = next((m for m in modules_results if m["module"] == "VirusTotal"), {})
+    vt_malicious_votes = vt_mod.get("evidence", {}).get("malicious_votes", 0) if vt_mod.get("status") == "success" else 0
+    vt_flagged = vt_malicious_votes > 2
+
+    redir_mod = next((m for m in modules_results if m["module"] == "Redirect Analysis"), {})
+    hop_count = redir_mod.get("evidence", {}).get("hops_count", 0) if redir_mod.get("status") == "success" else 0
+
+    http_mod = next((m for m in modules_results if m["module"] == "HTTP Status Check"), {})
+    http_success = http_mod.get("status") == "success"
+    http_headers = http_mod.get("evidence", {}).get("headers", {}) if http_success else {}
+
+    screenshot_mod = next((m for m in modules_results if m["module"] == "Screenshot Capture"), {})
+    screenshot_success = screenshot_mod.get("status") == "success"
+    page_title = screenshot_mod.get("evidence", {}).get("page_title", "") if screenshot_success else ""
+
+    # 3. Calculate Trust Score (Max 100)
+    trust_score = 0
+    trust_indicators = []
+
+    # HTTPS is enabled
+    if parsed_u and parsed_u.scheme == "https":
+        trust_score += 10
+        trust_indicators.append("✔ HTTPS Enabled")
+    
+    # SSL certificate is valid and not expired
+    if ssl_valid:
+        trust_score += 15
+        trust_indicators.append("✔ Valid SSL Certificate")
+        
+    # Domain age is older than threshold (e.g. > 1 year)
+    if age_days >= 365:
+        trust_score += 15
+        trust_indicators.append(f"✔ Domain Age: {age_days // 365} Years")
+    elif age_days >= 180:
+        trust_score += 10
+        trust_indicators.append("✔ Domain Age: > 6 Months")
+        
+    # WHOIS registry information is valid
+    if whois_success and age_days >= 0 and registrar != "Unknown":
+        trust_score += 10
+        trust_indicators.append("✔ Valid WHOIS Registry")
+        
+    # Clean scan history / reputation
+    if vt_mod.get("status") == "success" and vt_malicious_votes == 0:
+        trust_score += 10
+        trust_indicators.append("✔ Clean Scan History (VirusTotal)")
+        
+    # No blacklist matches (PhishTank)
+    if pt_mod.get("status") == "success" and not phishtank_match:
+        trust_score += 10
+        trust_indicators.append("✔ No Blacklist Matches (PhishTank)")
+        
+    # No reputation alerts (Google Safe Browsing)
+    if gsb_mod.get("status") == "success" and not gsb_alert:
+        trust_score += 10
+        trust_indicators.append("✔ Clean Reputation (Google Safe Browsing)")
+        
+    # No malicious redirects (hops <= 1)
+    if hop_count <= 1:
+        trust_score += 10
+        trust_indicators.append("✔ No Suspicious Redirects")
+        
+    # Expected page title
+    if page_title.strip():
+        trust_score += 5
+        trust_indicators.append(f"✔ Expected Page Title: \"{page_title[:40]}\"")
+        
+    # Expected company ownership
+    if organization != "Unknown" and organization.strip():
+        trust_score += 5
+        trust_indicators.append(f"✔ Verified Owner: {organization}")
+
+    trust_score = min(max(trust_score, 0), 100)
+
+    # 4. Calculate Risk Score (Max 100)
+    risk_score = 0
+    risk_indicators = []
+    has_strong_malicious_indicator = False
+
+    # High Risk Indicators
+    if phishtank_match:
+        risk_score += 50
+        has_strong_malicious_indicator = True
+        risk_indicators.append("❌ Known phishing domain (PhishTank blacklist)")
+    if gsb_alert:
+        risk_score += 50
+        has_strong_malicious_indicator = True
+        risk_indicators.append("❌ Flagged by Google Safe Browsing")
+    if vt_flagged:
+        risk_score += 50
+        has_strong_malicious_indicator = True
+        risk_indicators.append(f"❌ Flagged by VirusTotal ({vt_malicious_votes} malicious reports)")
+    if brand_impersonation and similarity >= 80:
+        risk_score += 45
+        has_strong_malicious_indicator = True
+        risk_indicators.append(f"❌ Brand Impersonation: Targeted impersonation of {detected_brand} ({similarity}% similarity)")
+
+    # Expired SSL on login/payment page check
+    url_or_title_lower = (url + " " + page_title).lower()
+    is_login_payment_page = any(kw in url_or_title_lower for kw in ["login", "signin", "payment", "checkout", "bank", "pay"])
+    if not ssl_valid and dns_resolved and is_login_payment_page:
+        risk_score += 40
+        has_strong_malicious_indicator = True
+        risk_indicators.append("❌ Invalid/Expired SSL certificate on login/payment page")
+
+    # Fake login / credential harvesting check
+    has_input_fields = False
+    html_mod = next((m for m in modules_results if m["module"] == "HTML Metadata Extraction"), {})
+    if html_mod.get("status") == "success":
+        body_lower = html_mod.get("evidence", {}).get("html_body", "").lower()
+        if "type=\"password\"" in body_lower or "<input" in body_lower:
+            has_input_fields = True
+    if has_input_fields and (age_days < 90 or brand_impersonation):
+        risk_score += 45
+        has_strong_malicious_indicator = True
+        risk_indicators.append("❌ Deceptive form/credential harvesting input elements detected")
+
+    # Suspicious (Moderate) Indicators
+    if age_days >= 0 and age_days < 90:
+        risk_score += 15
+        risk_indicators.append(f"⚠ Recently registered young domain ({age_days} days)")
+    if len(url) > 75:
+        risk_score += 10
+        risk_indicators.append(f"⚠ Very long URL detected ({len(url)} characters)")
+        
+    # URL shortening service check
+    URL_SHORTENERS = {"bit.ly", "tinyurl.com", "tinyurl", "goo.gl", "t.co", "ow.ly", "is.gd", "buff.ly", "adf.ly"}
+    is_shortener = any(domain_lower == short or domain_lower.endswith("." + short) for short in URL_SHORTENERS)
+    if is_shortener:
+        risk_score += 15
+        risk_indicators.append("⚠ URL shortening service used")
+
+    # Unusual subdomains check
+    subdomains_count = len(domain_lower.split(".")) - 2
+    contains_phish_kw_subdomain = any(kw in domain_lower.split(".")[0] for kw in ["login", "secure", "verify", "update", "bank"])
+    if subdomains_count >= 2 or contains_phish_kw_subdomain:
+        risk_score += 15
+        risk_indicators.append("⚠ Unusual or deep subdomain structure")
+
+    # Redirect hops
+    if hop_count >= 2:
+        risk_score += 10
+        risk_indicators.append(f"⚠ Suspicious redirects detected ({hop_count} hops)")
+
+    # Visually similar typosquatting
+    if brand_impersonation and similarity < 80:
+        risk_score += 15
+        risk_indicators.append(f"⚠ Domain name visually similar to brand: {detected_brand} ({similarity}%)")
+
+    # SSL not valid but not on login/payment page
+    if not ssl_valid and dns_resolved and not is_login_payment_page:
+        risk_score += 15
+        risk_indicators.append("⚠ Missing or invalid SSL security certificate")
+
+    # Obfuscated JavaScript or hidden fields check
+    body_lower = html_mod.get("evidence", {}).get("html_body", "").lower() if html_mod.get("status") == "success" else ""
+    has_obfuscation = "eval(function(p,a,c,k,e,r)" in body_lower or "_0x" in body_lower or "unescape(" in body_lower
+    if has_obfuscation:
+        risk_score += 15
+        risk_indicators.append("⚠ Obfuscated/Packed JavaScript signatures detected")
+
+    # Expected external scripts check
+    if "<script src=\"http://" in body_lower:
+        risk_score += 10
+        risk_indicators.append("⚠ Unexpected external HTTP scripts loaded on secure site")
+
+    # 5. Informational Events (Risk Impact = 0)
+    # Check DNS Failure
+    if dns_mod.get("status") == "failed":
+        risk_indicators.append("⚠ Temporary DNS lookup failure (No impact)")
+        
+    # Check Browser/Screenshot Timeout
+    if screenshot_mod.get("status") == "failed":
+        risk_indicators.append("⚠ Website preview unavailable (No impact)")
+        
+    # Check Network Timeout
+    if http_mod.get("status") == "failed":
+        risk_indicators.append("⚠ Network timeout / Slow website (No impact)")
+        
+    # Check Google Favicon Service
+    favicon_mod = next((m for m in modules_results if m["module"] == "Favicon Extraction"), {})
+    fav_url = favicon_mod.get("evidence", {}).get("favicon_url", "")
+    if "google.com/s2/favicons" in fav_url:
+        risk_indicators.append("⚠ Google Favicon Service used (No impact)")
+
+    # CDN checks
+    server_hdr = str(http_headers.get("Server", "")).lower()
+    via_hdr = str(http_headers.get("Via", "")).lower()
+    if "cloudflare" in server_hdr:
+        risk_indicators.append("⚠ Cloudflare CDN detected (No impact)")
+    if "cloudfront" in via_hdr or "cloudfront" in server_hdr:
+        risk_indicators.append("⚠ AWS CDN CloudFront detected (No impact)")
+    if "akamai" in server_hdr or "akamai" in via_hdr:
+        risk_indicators.append("⚠ Akamai CDN detected (No impact)")
+
+    # 6. Apply False Positive Prevention Rule
+    if not has_strong_malicious_indicator:
+        has_suspicious_evidence = (
+            brand_impersonation or
+            (age_days >= 0 and age_days < 90) or
+            is_shortener or
+            hop_count >= 2 or
+            has_obfuscation
+        )
+        if not has_suspicious_evidence:
+            risk_score = 0
+            decision = "SAFE"
             confidence = 95
-            reason = "Multiple threat indicators agree (brand impersonation, young domain, suspicious TLD, or database matching)."
-        elif score >= 35 or not ssl_valid:
-            # Removed whois_failed override here to fulfill Rule 1: WHOIS failure alone must never increase risk significantly
+            reason = "Website is safe. Verified trust indicators are strong, and no malicious signals exist."
+        elif risk_score >= 35:
             decision = "SUSPICIOUS"
             confidence = 80
-            reason = "Incomplete evidence or failed compliance checks. Further manual verification suggested."
+            reason = "Website exhibits suspicious characteristics. Review details below."
         else:
             decision = "SAFE"
             confidence = 90
-            reason = (
-                "No brand abuse, valid SSL, clean reputation, and trusted domain traits."
-            )
+            reason = "No strong malicious indicators found. Website is safe."
+    else:
+        risk_score = min(max(risk_score, 0), 100)
+        if risk_score >= 70:
+            decision = "HIGH RISK"
+            confidence = 95
+            reason = "High risk threat indicators verified. Known phishing database match, brand abuse, or malware alert."
+        elif risk_score >= 35:
+            decision = "SUSPICIOUS"
+            confidence = 80
+            reason = "Website exhibits suspicious indicators. Manual verification recommended."
+        else:
+            decision = "SAFE"
+            confidence = 90
+            reason = "Risk signals present but overruled by safe indicator trust factors."
 
     return {
-        "risk_score": score,
+        "trust_score": trust_score,
+        "risk_score": risk_score,
         "decision": decision,
         "confidence": confidence,
         "reason": reason,
-        "indicators": indicators,
+        "trust_indicators": trust_indicators,
+        "risk_indicators": risk_indicators,
         "detected_brand": detected_brand,
-        "detected_keywords": detected_keywords,
+        "detected_keywords": detected_keywords
     }

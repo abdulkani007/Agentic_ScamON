@@ -74,6 +74,7 @@ const FadeInSection = ({ children }) => {
 export default function LandingPage({ onStartAnalysis }) {
   const [view, setView] = useState('landing'); // 'landing', 'boot'
   const [bootStep, setBootStep] = useState(0);
+  const [expandedFaq, setExpandedFaq] = useState(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const containerRef = useRef(null);
 
@@ -406,6 +407,21 @@ export default function LandingPage({ onStartAnalysis }) {
               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', marginTop: '4px' }}>Integrity</div>
             </div>
           </div>
+
+          {/* Defended Assets Marquee */}
+          <div style={{ marginTop: '30px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '24px' }}>
+            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '14px', fontWeight: 'bold' }}>
+              Defending Cyber Assets At Trusted Organizations
+            </div>
+            <div style={{ display: 'flex', gap: '24px', alignItems: 'center', opacity: 0.45, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', color: '#fff', fontFamily: 'sans-serif' }}>intel</span>
+              <span style={{ fontSize: '13px', fontWeight: '900', color: '#fff', fontFamily: 'sans-serif' }}>accenture</span>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#fff', fontFamily: 'sans-serif' }}>amazon</span>
+              <span style={{ fontSize: '12px', fontWeight: '500', color: '#fff', fontFamily: 'sans-serif' }}>Google</span>
+              <span style={{ fontSize: '13px', fontWeight: 'bold', letterSpacing: '0.5px', color: '#fff', fontFamily: 'sans-serif' }}>Infosys</span>
+              <span style={{ fontSize: '12px', fontWeight: '800', letterSpacing: '1.5px', color: '#fff', fontFamily: 'sans-serif' }}>ORACLE</span>
+            </div>
+          </div>
         </div>
 
         {/* Right Side Cyber security Animation */}
@@ -583,7 +599,6 @@ export default function LandingPage({ onStartAnalysis }) {
               style={{
                 display: 'flex', 
                 flexDirection: 'column', 
-                gap: '24px', 
                 alignItems: 'center',
                 background: 'rgba(5, 7, 10, 0.4)',
                 border: '1px solid rgba(0, 230, 118, 0.1)',
@@ -591,36 +606,116 @@ export default function LandingPage({ onStartAnalysis }) {
                 position: 'relative'
               }}
             >
-              {/* Flow Path */}
               {[
-                { step: "USER INPUT", details: "Scam URL, email campaign, voice call, or visual QR sequence" },
-                { step: "MASTER ORCHESTRATOR", details: "Initial threat triage & pipeline scheduling" },
-                { step: "SPECIALIZED AGENT AUDITING", details: "Website Scanner, Email Checker, SMS Collector, Call Analyzer, Visual Impersonation Scan" },
-                { step: "THREAT CORRELATION & VAULT HISTORY", details: "Cross-vector data linkage & immutable SHA-256 archiving" },
-                { step: "EXPLAINABLE DECISION & COMPLAINT SYSTEM", details: "Interactive AI audit logs & regulatory authority ready briefs" },
-                { step: "CYBER SECURITY DASHBOARD", details: "Unified live analytics telemetry monitoring console" }
+                { 
+                  header: "INGESTION-GATEWAY",
+                  step: "USER INPUT", 
+                  details: "Scam URL, email campaign, voice call, or visual QR sequence",
+                  status: "[STATUS: ACTIVE_INGEST]" 
+                },
+                { 
+                  header: "COGNITIVE-ROUTER",
+                  step: "MASTER ORCHESTRATOR", 
+                  details: "Initial threat triage & pipeline scheduling",
+                  status: "[CORE: CLASSIFYING_VECTORS]" 
+                },
+                { 
+                  header: "THREAT-AUDITORS",
+                  step: "SPECIALIZED AGENT AUDITING", 
+                  details: "Website Scanner, Email Checker, SMS Collector, Call Analyzer, Visual Impersonation Scan",
+                  status: "[AGENTS: MULTI_THREADED_EXEC]" 
+                },
+                { 
+                  header: "VAULT-CORRELATOR",
+                  step: "THREAT CORRELATION & VAULT HISTORY", 
+                  details: "Cross-vector data linkage & immutable SHA-256 archiving",
+                  status: "[DB: IMMUTABLE_LEDGER_SYNC]" 
+                },
+                { 
+                  header: "EXPLAINABILITY-XAI",
+                  step: "EXPLAINABLE DECISION & COMPLAINT SYSTEM", 
+                  details: "Interactive AI audit logs & regulatory authority ready briefs",
+                  status: "[REPORTS: COMPLAINT_GEN_READY]" 
+                },
+                { 
+                  header: "TELEMETRY-CONSOLE",
+                  step: "CYBER SECURITY DASHBOARD", 
+                  details: "Unified live analytics telemetry monitoring console",
+                  status: "[SYSTEM: ONLINE_ACTIVE]" 
+                }
               ].map((flow, index, arr) => (
                 <React.Fragment key={index}>
+                  {/* Blackbox style Window Pane Card */}
                   <div 
+                    className="triage-pipeline-box"
                     style={{
                       width: '100%',
-                      maxWidth: '480px',
-                      border: '1px solid rgba(0,230,118,0.2)',
-                      background: '#05070A',
-                      padding: '16px 20px',
-                      textAlign: 'center',
-                      position: 'relative',
-                      boxShadow: '0 0 15px rgba(0,0,0,0.5)'
+                      maxWidth: '520px',
+                      background: 'rgba(2, 3, 5, 0.8)',
+                      border: '1px solid rgba(0, 230, 118, 0.15)',
+                      borderRadius: '4px',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                      fontFamily: 'monospace',
+                      transition: 'all 0.3s ease',
+                      cursor: 'pointer'
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = '#00E676';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 230, 118, 0.25)';
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.15)';
+                      e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.6)';
+                      e.currentTarget.style.transform = 'none';
                     }}
                   >
-                    <div style={{ fontSize: '10px', color: '#00E676', fontFamily: 'monospace', fontWeight: 'bold', marginBottom: '4px' }}>STEP 0{index + 1}</div>
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#fff', textTransform: 'uppercase', letterSpacing: '1px' }}>{flow.step}</div>
-                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '4px' }}>{flow.details}</div>
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9.5px', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '8px' }}>
+                      <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                        <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FF3D00' }} />
+                        <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FFC400' }} />
+                        <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00E676' }} />
+                        <span style={{ marginLeft: '6px', letterSpacing: '1px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)' }}>{flow.header}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#00E676', fontWeight: 'bold' }}>
+                        <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>STEP 0{index + 1}</span>
+                      </div>
+                    </div>
+
+                    {/* Card Content */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ textAlign: 'left' }}>
+                        <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#fff', margin: '0 0 6px 0', textTransform: 'uppercase', letterSpacing: '1px' }}>{flow.step}</h4>
+                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', margin: 0, lineHeight: '1.5', maxWidth: '360px' }}>{flow.details}</p>
+                      </div>
+                      <div style={{ fontSize: '9.5px', color: '#00E676', fontWeight: 'bold', background: 'rgba(0, 230, 118, 0.05)', border: '1px solid rgba(0, 230, 118, 0.2)', padding: '4px 8px', borderRadius: '2px' }}>
+                        {flow.status}
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Pulsing Vertical Laser Trail Connector */}
                   {index < arr.length - 1 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                      <div style={{ width: '1px', height: '20px', backgroundColor: '#00E676', opacity: 0.5 }} />
-                      <span style={{ fontSize: '9px', color: '#00E676', fontWeight: 'bold' }}>▼</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '8px 0', height: '40px', width: '100%' }}>
+                      <svg style={{ width: '100%', height: '100%' }}>
+                        <line x1="50%" y1="0%" x2="50%" y2="100%" stroke="rgba(0, 230, 118, 0.15)" strokeWidth="2" />
+                        <line 
+                          x1="50%" 
+                          y1="0%" 
+                          x2="50%" 
+                          y2="100%" 
+                          stroke="#00E676" 
+                          strokeWidth="2.5" 
+                          strokeDasharray="6 12"
+                        >
+                          <animate attributeName="stroke-dashoffset" values="18;0" dur="0.8s" repeatCount="indefinite" />
+                        </line>
+                      </svg>
                     </div>
                   )}
                 </React.Fragment>
@@ -665,6 +760,92 @@ export default function LandingPage({ onStartAnalysis }) {
                   <p style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.5)', margin: 0, lineHeight: '1.5' }}>{feat.desc}</p>
                 </div>
               ))}
+            </div>
+          </FadeInSection>
+        </div>
+      </section>
+
+      {/* FAQ Section */}
+      <section id="faq" style={{ padding: '80px 40px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(5, 7, 10, 0.2)' }}>
+        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+          <FadeInSection>
+            <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+              <span style={{ fontSize: '11px', color: '#00E676', letterSpacing: '2px', fontWeight: 'bold' }}>SYSTEM DOCUMENTATION</span>
+              <h2 style={{ fontSize: '30px', fontWeight: 'bold', color: '#fff', letterSpacing: '-0.5px', marginTop: '8px', textTransform: 'uppercase' }}>Frequently Asked Questions</h2>
+              <div style={{ width: '40px', height: '2px', backgroundColor: '#00E676', margin: '16px auto 0 auto' }} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {[
+                {
+                  q: "How does real-time streaming speech recognition classify call scams?",
+                  a: "It captures microphone or telephony audio in 200ms–400ms slices, transcribes it on-the-fly via localized CTranslate2-based Faster-Whisper, and parses linguistic intent. A dynamic risk engine evaluates speech patterns continuously, updating the transcript word-by-word with target latency below 300ms."
+                },
+                {
+                  q: "Does ScamON upload my voice recordings or texts to external servers?",
+                  a: "Absolutely not. ScamON is built with a zero-leak philosophy. All Whisper audio classifications, SMS linguistic triages, and visual OCR checks run completely locally on your hardware, utilizing CUDA GPU acceleration or lightweight CPU fallback instructions."
+                },
+                {
+                  q: "What happens when the master orchestrator flags a threat vector?",
+                  a: "The orchestrator immediately registers the indicators of compromise (IoC) into the Evidence Vault. It starts cross-correlation across other vectors (checking if the phone scam coordinates with a typosquatted domain), flags a high-priority threat alert, and formats a regulatory complaint package automatically."
+                },
+                {
+                  q: "Can I customize the classification models or target compliance templates?",
+                  a: "Yes. System configs in settings allow analysts to adjust detection thresholds, fine-tune VAD filters, toggle downstream specialist agents, and export audit briefs to formats suitable for FTC, IC3, or local cybercrime cells."
+                }
+              ].map((faq, index) => {
+                const isOpen = expandedFaq === index;
+                return (
+                  <div 
+                    key={index}
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      background: 'rgba(5, 7, 10, 0.45)',
+                      borderRadius: '4px',
+                      overflow: 'hidden',
+                      transition: 'border-color 0.2s ease'
+                    }}
+                  >
+                    <button
+                      onClick={() => setExpandedFaq(isOpen ? null : index)}
+                      style={{
+                        width: '100%',
+                        padding: '20px 24px',
+                        background: 'transparent',
+                        border: 'none',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: 'monospace',
+                        fontSize: '13.5px',
+                        fontWeight: 'bold',
+                        outline: 'none'
+                      }}
+                    >
+                      <span>{faq.q}</span>
+                      <span style={{ color: '#00E676', marginLeft: '12px', fontSize: '16px' }}>{isOpen ? '−' : '+'}</span>
+                    </button>
+                    <div 
+                      style={{
+                        maxHeight: isOpen ? '200px' : '0',
+                        overflow: 'hidden',
+                        transition: 'all 0.3s ease-in-out',
+                        padding: isOpen ? '0 24px 20px 24px' : '0 24px',
+                        fontSize: '12px',
+                        color: 'rgba(255,255,255,0.5)',
+                        lineHeight: '1.6',
+                        borderTop: isOpen ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                        paddingTop: isOpen ? '16px' : '0'
+                      }}
+                    >
+                      {faq.a}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </FadeInSection>
         </div>

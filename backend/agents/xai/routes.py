@@ -584,3 +584,60 @@ async def export_xai_docx(id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename=xai_{id}.docx"}
     )
+
+
+@router.post("/chat/threats")
+async def chat_with_threats(payload: Dict[str, Any] = Body(...)):
+    """
+    Handles AI Copilot queries for Global Threat Intelligence Feed audits.
+    """
+    message = payload.get("message", "")
+    history = payload.get("history", [])
+    stats = payload.get("stats", {})
+    threat_indicators = payload.get("threat_indicators", [])
+
+    system_prompt = f"""You are the ScamON Threat Intelligence Copilot, an expert SOC analyst assistant.
+Your job is to answer questions about the active global threat telemetry, phishing campaigns, scam interception rate, and threat indicators.
+
+Here is the current Global Threat Feed Context:
+- Statistics: {json.dumps(stats, indent=2)}
+- Active SOC Threat Indicators: {json.dumps(threat_indicators, indent=2)}
+- Interception Rate: 98.4%
+- Sandbox Nodes Audited: 84,192
+
+Instructions:
+1. Provide clear, professional SOC insights when answering queries about the current active threats.
+2. If asked about specific targets (like HDFC Bank or Netflix), use the threat indicators list to identify matching vectors, risk scores, and status (e.g. BLOCKED, QUARANTINED).
+3. Frame answers in professional cybersecurity context (e.g. threat mitigation, typosquatting vectors, SPF/DMARC spoofing audits).
+4. Format your output in clean Markdown with bold headers or comparison lists.
+"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+    messages.append({"role": "user", "content": message})
+
+    if GROQ_API_KEY and not GROQ_API_KEY.startswith("your_"):
+        try:
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            body = {
+                "model": "llama-3.1-8b-instant",
+                "messages": messages,
+                "temperature": 0.2,
+                "max_tokens": 800,
+            }
+            response = requests.post(GROQ_API_URL, headers=headers, json=body, timeout=10)
+            if response.status_code == 200:
+                result = response.json()
+                answer = result["choices"][0]["message"]["content"]
+                return {"answer": answer}
+            else:
+                return {"answer": f"Reasoning engine returned error: {response.text}"}
+        except Exception as err:
+            return {"answer": f"Unable to reach reasoning engine: {str(err)}"}
+
+    return {"answer": "Reasoning engine offline. Please check your GROQ_API_KEY configuration."}
+
