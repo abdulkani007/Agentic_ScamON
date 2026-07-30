@@ -1,0 +1,58 @@
+{
+  "VM-SBIBNK": {
+    "organization": "SBI",
+    "verified": false,
+    "category": "Bank",
+    "sender_type": "alphanumeric_short_code",
+    "reported_scams": 12
+  },
+  "VMSBIBNK": {
+    "organization": "SBI",
+    "verified": false,
+    "category": "Bank",
+    "sender_type": "alphanumeric_short_code",
+    "reported_scams": 12
+  },
+  "SBIUPD": {
+    "organization": "SBI",
+    "verified": false,
+    "category": "Bank",
+    "sender_type": "alphanumeric_sender",
+    "reported_scams": 12
+  },
+  "HDFCAL": {
+    "organization": "HDFC",
+    "verified": true,
+    "category": "Bank",
+    "sender_type": "alphanumeric_sender",
+    "reported_scams": 0
+  },
+  "VK-AMAZON": {
+    "organization": "Amazon",
+    "verified": true,
+    "category": "E-Commerce",
+    "sender_type": "alphanumeric_short_code",
+    "reported_scams": 0
+  },
+  "VKAMAZON": {
+    "organization": "Amazon",
+    "verified": true,
+    "category": "E-Commerce",
+    "sender_type": "alphanumeric_short_code",
+    "reported_scams": 0
+  },
+  "+919876543210": {
+    "organization": "Personal",
+    "verified": false,
+    "category": "Personal Number",
+    "sender_type": "personal_number",
+    "reported_scams": 4
+  },
+  "919876543210": {
+    "organization": "Personal",
+    "verified": false,
+    "category": "Personal Number",
+    "sender_type": "personal_number",
+    "reported_scams": 4
+  }
+}

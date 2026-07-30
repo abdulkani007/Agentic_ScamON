@@ -1,0 +1,25 @@
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional
+
+class VisualScamAnalysisResponse(BaseModel):
+    status: str = Field(..., description="API execution status (success or failed)")
+    image_url: str = Field(..., description="Web-serveable URL to the uploaded screenshot")
+    image_type: str = Field(..., description="Classified screenshot or poster category")
+    extracted_text: str = Field(..., description="All visible alphanumeric strings extracted from the image")
+    risk_score: int = Field(..., description="Aggregated threat risk score (0-100)")
+    threat_level: str = Field(..., description="Overall severity band: SAFE | LOW | MEDIUM | HIGH | CRITICAL")
+    scam_category: str = Field(..., description="Scam category classification (e.g. Phishing, KYC, Job, UPI)")
+    confidence: float = Field(..., description="Confidence rating of the AI analysis (0.0 to 1.0)")
+    reasoning: str = Field(..., description="Detailed explanation of findings and scam signatures")
+    recommendations: List[str] = Field(default=[], description="Actionable safety guidance rules")
+    entities: Dict[str, Any] = Field(default={}, description="Key-value pairs of extracted entities (URLs, numbers, etc.)")
+    urls_found: List[str] = Field(default=[], description="List of URL identifiers extracted")
+    emails_found: List[str] = Field(default=[], description="List of email addresses extracted")
+    phone_numbers_found: List[str] = Field(default=[], description="List of telephone numbers extracted")
+    upi_ids_found: List[str] = Field(default=[], description="List of UPI / banking payment IDs extracted")
+    visual_indicators: List[str] = Field(default=[], description="List of observed social engineering signatures")
+    agents_invoked: List[str] = Field(default=[], description="List of subordinate agents invoked during analysis")
+    agent_results: Dict[str, Any] = Field(default={}, description="Telemetry logs returned by invoked agents (Website, Email, SMS)")
+    qr_data: Optional[str] = Field(default=None, description="Decoded QR payload string, if applicable")
+    timestamp: str = Field(..., description="Investigation date and time ISO string")
+    case_id: str = Field(..., description="Unified forensics case ID")

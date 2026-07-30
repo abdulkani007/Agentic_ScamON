@@ -286,6 +286,29 @@ async def analyze_call(
     try:
         log_payload = response_payload.model_dump()
         log_analysis(log_payload)
+        
+        # Save to unified investigations history
+        from agents.history_helper import save_investigation
+        threat_level = "SAFE"
+        if response_payload.risk_score >= 75:
+            threat_level = "CRITICAL"
+        elif response_payload.risk_score >= 50:
+            threat_level = "HIGH"
+        elif response_payload.risk_score >= 25:
+            threat_level = "MEDIUM"
+        elif response_payload.risk_score >= 10:
+            threat_level = "LOW"
+            
+        save_investigation(
+            agent_type="call",
+            investigation_id=response_payload.investigation_id,
+            risk_score=response_payload.risk_score,
+            threat_level=threat_level,
+            input_data=response_payload.caller or "Audio Waveform Scan",
+            summary=response_payload.ai_analysis.summary,
+            full_report=log_payload,
+            recommendation=response_payload.recommendation
+        )
     except Exception as db_err:
         logger.warning(f"Failed to log Call analysis results to MongoDB: {db_err}")
 
@@ -390,20 +413,20 @@ import asyncio
 import time
 
 @router.websocket("/api/live-call/ws")
-async def live_call_websocket(websocket: WebSocket):
+async def live_call_websocket(websocket: WebSocket, case_id: Optional[str] = None):
     await websocket.accept()
     logger.info("Live Call Detector WebSocket connection established.")
     
-    # Create a unique temp file to hold incoming audio chunks
+    # Create a unique session ID and temp file to hold incoming audio chunks
+    session_id = f"live_{uuid.uuid4().hex}"
     temp_dir = tempfile.gettempdir()
-    temp_filename = f"live_{uuid.uuid4().hex}.webm"
-    temp_path = os.path.join(temp_dir, temp_filename)
+    temp_path = os.path.join(temp_dir, f"{session_id}.webm")
     
     # Open / initialize empty file
     with open(temp_path, "wb") as f:
         pass
         
-    running_transcript = ""
+    accumulated_transcript = ""
     last_analysis_time = 0.0
     
     try:
@@ -428,35 +451,52 @@ async def live_call_websocket(websocket: WebSocket):
                         new_transcript = stt_res.get("transcript", "").strip()
                         logger.info(f"STT Live Transcribed segment: '{new_transcript}'")
                         
-                        if new_transcript and new_transcript != running_transcript:
-                            running_transcript = new_transcript
-                            # Send live transcript update to client
-                            await websocket.send_json({
-                                "type": "transcript",
-                                "text": running_transcript
-                            })
-                            
-                            # Run AI Scam analysis, throttled to every 5 seconds
-                            current_time = time.time()
-                            if current_time - last_analysis_time >= 5.0:
-                                last_analysis_time = current_time
-                                # Perform forensic scanning
-                                ai_res = await run_live_scam_analysis(running_transcript)
-                                
-                                # Send risk reports updates back to client
+                        if new_transcript:
+                            # Send live transcript segment update to client immediately
+                            try:
                                 await websocket.send_json({
-                                    "type": "analysis",
-                                    "data": ai_res
+                                    "type": "transcript",
+                                    "text": new_transcript
                                 })
+                            except RuntimeError:
+                                logger.info("Client disconnected while sending transcript segment.")
+                                break
+
+                            # Accumulate context
+                            if accumulated_transcript:
+                                accumulated_transcript += " " + new_transcript
+                            else:
+                                accumulated_transcript = new_transcript
+                            
+                            # Run AI Scam analysis, throttled to every 3 seconds on accumulated text
+                            current_time = time.time()
+                            if current_time - last_analysis_time >= 3.0:
+                                last_analysis_time = current_time
+                                # Perform forensic scanning on the whole context
+                                ai_res = await run_live_scam_analysis(accumulated_transcript)
+                                
+                                # Send risk reports updates back to client with flat schema
+                                try:
+                                    await websocket.send_json({
+                                        "type": "analysis",
+                                        "risk": ai_res["risk_score"],
+                                        "category": ai_res["category"],
+                                        "confidence": ai_res["confidence"],
+                                        "recommendation": ai_res["recommendation"],
+                                        "reason": ai_res["reasoning"]
+                                    })
+                                except RuntimeError:
+                                    logger.info("Client disconnected while sending analysis.")
+                                    break
                                 
                                 # Save threat assessment details to MongoDB Atlas
                                 try:
-                                    save_live_analysis_to_db(running_transcript, ai_res)
+                                    save_live_analysis_to_db(session_id, accumulated_transcript, ai_res)
                                 except Exception as db_err:
                                     logger.warning(f"Failed to save live scan to DB: {db_err}")
                                     
                     except Exception as stt_err:
-                        logger.error(f"Error in STT live transcription: {stt_err}")
+                        logger.error("Error in STT live transcription:", exc_info=True)
                         
             elif "text" in message:
                 text_msg = message["text"]
@@ -526,18 +566,48 @@ async def run_live_scam_analysis(transcript: str) -> dict:
     }
 
 
-def save_live_analysis_to_db(transcript: str, ai_res: dict) -> None:
-    """Stores live analysis details to the new MongoDB collection live_call_analysis."""
+def save_live_analysis_to_db(session_id: str, transcript: str, ai_res: dict) -> None:
+    """Stores live analysis details to live_call_analysis and unified investigations."""
     from database import get_db
     db = get_db()
     if db is not None:
         collection = db["live_call_analysis"]
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-        collection.insert_one({
+        
+        live_report = {
+            "session_id": session_id,
             "timestamp": timestamp,
             "transcript": transcript,
             "risk_score": ai_res["risk_score"],
             "category": ai_res["category"],
             "confidence": ai_res["confidence"],
-            "recommendation": ai_res["recommendation"]
-        })
+            "recommendation": ai_res["recommendation"],
+            "reasoning": ai_res.get("reason", "")
+        }
+        
+        # update or insert
+        collection.update_one({"session_id": session_id}, {"$set": live_report}, upsert=True)
+        
+        # Save to unified investigations history
+        from agents.history_helper import save_investigation
+        threat_level = "SAFE"
+        if ai_res["risk_score"] >= 75:
+            threat_level = "CRITICAL"
+        elif ai_res["risk_score"] >= 50:
+            threat_level = "HIGH"
+        elif ai_res["risk_score"] >= 25:
+            threat_level = "MEDIUM"
+        elif ai_res["risk_score"] >= 10:
+            threat_level = "LOW"
+            
+        save_investigation(
+            agent_type="live_call",
+            investigation_id=session_id,
+            risk_score=ai_res["risk_score"],
+            threat_level=threat_level,
+            input_data=f"Live Session ({ai_res['category']})",
+            summary=ai_res.get("reason", "Live conversation monitored for scam intent."),
+            full_report=live_report,
+            recommendation=ai_res["recommendation"],
+            case_id=case_id
+        )

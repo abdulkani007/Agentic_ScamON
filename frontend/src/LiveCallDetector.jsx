@@ -20,10 +20,11 @@ export default function LiveCallDetector() {
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const timerIntervalRef = useRef(null);
-  const audioContextRef = useRef(null);
   const soundIntervalRef = useRef(null);
   const transcriptEndRef = useRef(null);
   const chunksRef = useRef([]);
+  const recordingIntervalRef = useRef(null);
+  const streamRef = useRef(null);
 
   // Auto-scroll transcript panel
   useEffect(() => {
@@ -87,56 +88,106 @@ export default function LiveCallDetector() {
     try {
       setMicStatus('REQUESTING PERMISSION...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       
-      // Initialize WebSocket connection to Call Agent port 8000
-      const wsUrl = `ws://127.0.0.1:8000/api/live-call/ws`;
-      wsRef.current = new WebSocket(wsUrl);
+      const activeCaseId = localStorage.getItem("activeCaseId") || "";
+      const wsUrl = `ws://127.0.0.1:8000/api/live-call/ws?case_id=${activeCaseId}`;
+      const ws = new WebSocket(wsUrl);
 
-      wsRef.current.onopen = () => {
+      ws.onopen = () => {
+        console.log("WebSocket connection opened successfully.");
         setIsListening(true);
         setMicStatus('LISTENING...');
         setTranscript('Connection established. Capturing audio from microphone...\n');
         chunksRef.current = [];
 
-        // Start media recorder
-        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-        mediaRecorderRef.current = mediaRecorder;
+        // Start recursive 3-second segment recording sequence
+        const recordNextChunk = () => {
+          if (!streamRef.current || ws.readyState !== WebSocket.OPEN) return;
 
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            chunksRef.current.push(event.data);
-            const completeBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(completeBlob);
+          const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
+          const localChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              localChunks.push(event.data);
             }
-          }
+          };
+
+          mediaRecorder.onstop = () => {
+            if (localChunks.length > 0 && ws.readyState === WebSocket.OPEN) {
+              const audioBlob = new Blob(localChunks, { type: 'audio/webm' });
+              console.log("Sending segment audio blob of size:", audioBlob.size);
+              ws.send(audioBlob);
+            }
+          };
+
+          mediaRecorder.start();
+
+          // Stop after 3 seconds to package and send the chunk
+          setTimeout(() => {
+            if (mediaRecorder.state !== 'inactive') {
+              try {
+                mediaRecorder.stop();
+              } catch (e) {}
+            }
+          }, 3000);
         };
 
-        // Stream audio in 3-second slices
-        mediaRecorder.start(3000);
+        // Trigger first record sequence
+        recordNextChunk();
+
+        // Repeat recording every 3 seconds
+        recordingIntervalRef.current = setInterval(() => {
+          recordNextChunk();
+        }, 3000);
       };
 
-      wsRef.current.onmessage = (event) => {
+      ws.onmessage = (event) => {
+        console.warn("Received:", event.data);
         try {
           const payload = JSON.parse(event.data);
+          console.warn("Parsed payload:", payload);
           if (payload.type === 'transcript') {
-            setTranscript(payload.text);
+            if (payload.text && payload.text.trim()) {
+              setTranscript((previous) => {
+                if (!previous || previous.startsWith('Connection established')) {
+                  return payload.text;
+                }
+                // Check if segment is already at the end of the transcript to prevent duplicate appends
+                const prevLines = previous.split('\n');
+                const lastLine = prevLines[prevLines.length - 1];
+                if (lastLine.trim() === payload.text.trim()) {
+                  return previous;
+                }
+                return previous + '\n' + payload.text;
+              });
+            }
           } else if (payload.type === 'analysis') {
-            setAnalysis(payload.data);
+            setAnalysis({
+              risk_score: payload.risk !== undefined ? payload.risk : (payload.risk_score || 0),
+              category: payload.category || 'Analyzing...',
+              confidence: payload.confidence || 'N/A',
+              reasoning: payload.reason || payload.reasoning || '',
+              recommendation: payload.recommendation || 'Awaiting call data...'
+            });
           }
         } catch (err) {
           console.error("Error parsing WebSocket packet:", err);
         }
       };
 
-      wsRef.current.onclose = () => {
+      ws.onclose = (event) => {
+        console.log("WebSocket connection closed:", event);
         stopListening();
       };
 
-      wsRef.current.onerror = (err) => {
-        console.error("WebSocket error:", err);
+      ws.onerror = (err) => {
+        console.error("WebSocket error occurred:", err);
         stopListening();
       };
+
+      wsRef.current = ws;
 
     } catch (err) {
       console.error("Failed to start live listening:", err);
@@ -149,21 +200,33 @@ export default function LiveCallDetector() {
     setIsListening(false);
     setMicStatus('STANDBY');
     
+    // Clear chunk interval timers
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    
     // Stop recording
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
         mediaRecorderRef.current.stop();
-        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      } catch (e) {
-        console.warn("Failed to stop media recorder stream:", e);
-      }
+      } catch (e) {}
     }
     mediaRecorderRef.current = null;
 
-    // Close WebSocket
+    if (streamRef.current) {
+      try {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      } catch (e) {}
+      streamRef.current = null;
+    }
+
+    // Close WebSocket connection cleanly
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send("STOP");
+        try {
+          wsRef.current.send("STOP");
+        } catch (e) {}
       }
       try {
         wsRef.current.close();

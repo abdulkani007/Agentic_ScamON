@@ -28,6 +28,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Middleware to extract X-Case-ID header and populate contextvar
+from agents.evidence_vault.agent import active_case_id_context
+
+@app.middleware("http")
+async def extract_case_id_header(request: Request, call_next):
+    case_id = request.headers.get("X-Case-ID") or ""
+    token = active_case_id_context.set(case_id)
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        active_case_id_context.reset(token)
+
 # Mount static files folder
 static_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static"))
 os.makedirs(static_path, exist_ok=True)
@@ -36,6 +49,26 @@ app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 # Register routes router
 app.include_router(website_router)
+
+# Register Email Investigation Agent router
+from agents.email.routes import router as email_router
+app.include_router(email_router)
+
+# Register Explainability (XAI) Agent router
+from agents.xai.routes import router as xai_router
+app.include_router(xai_router)
+
+# Register Evidence Vault Agent router
+from agents.evidence_vault.routes import router as evidence_vault_router
+app.include_router(evidence_vault_router)
+
+# Register SMS Agent router
+from agents.sms_agent_routes import router as sms_router
+app.include_router(sms_router)
+
+# Register Visual Scam Investigation Agent router
+from agents.visual_scam import visual_scam_router
+app.include_router(visual_scam_router)
 
 
 @app.on_event("startup")

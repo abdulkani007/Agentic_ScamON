@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sms-agent"
+version = "1.0.0"
+description = "Reusable SMS analysis agent for ScamShield AI"
+requires-python = ">=3.13"
+
+[tool.setuptools]
+packages = { find = { include = ["sms_agent*"] } }

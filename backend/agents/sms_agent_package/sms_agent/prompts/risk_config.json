@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "otp": 12,
+    "payment": 12,
+    "urgency": 10,
+    "threat": 10,
+    "reward": 8,
+    "url_present": 5,
+    "multiple_urls": 5,
+    "organization_mentioned": 5
+  },
+  "tools": {
+    "reported_sender": 15,
+    "unknown_sender": 5,
+    "organization_mismatch": 20,
+    "unknown_organization": 5,
+    "malicious_url": 25
+  },
+  "llm": {
+    "max_weight": 25
+  }
+}

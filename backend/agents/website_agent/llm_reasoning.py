@@ -153,7 +153,7 @@ You must respond strictly with a JSON object. Do not include any markdown format
                 "Content-Type": "application/json",
             }
             body = {
-                "model": "llama3-8b-8192",
+                "model": "llama-3.1-8b-instant",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "response_format": {"type": "json_object"},

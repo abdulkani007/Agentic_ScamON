@@ -1,0 +1,77 @@
+{
+  "SBI": {
+    "official_name": "State Bank of India",
+    "aliases": [
+      "SBI",
+      "State Bank of India",
+      "SBI Bank"
+    ],
+    "official_domains": [
+      "sbi.co.in",
+      "onlinesbi.sbi"
+    ],
+    "official_sender_ids": [
+      "SBI",
+      "SBIUPD",
+      "SBIALT",
+      "VM-SBIBNK",
+      "VMSBIBNK"
+    ]
+  },
+  "HDFC": {
+    "official_name": "HDFC Bank",
+    "aliases": [
+      "HDFC",
+      "HDFC Bank",
+      "Housing Development Finance Corporation"
+    ],
+    "official_domains": [
+      "hdfcbank.com"
+    ],
+    "official_sender_ids": [
+      "HDFC",
+      "HDFCAL"
+    ]
+  },
+  "ICICI": {
+    "official_name": "ICICI Bank",
+    "aliases": [
+      "ICICI",
+      "ICICI Bank"
+    ],
+    "official_domains": [
+      "icicibank.com"
+    ],
+    "official_sender_ids": [
+      "ICICI"
+    ]
+  },
+  "AXIS": {
+    "official_name": "Axis Bank",
+    "aliases": [
+      "AXIS",
+      "Axis Bank"
+    ],
+    "official_domains": [
+      "axisbank.com"
+    ],
+    "official_sender_ids": [
+      "AXIS"
+    ]
+  },
+  "PAYTM": {
+    "official_name": "Paytm",
+    "aliases": [
+      "PAYTM",
+      "Paytm",
+      "Paytm Payments Bank"
+    ],
+    "official_domains": [
+      "paytm.com",
+      "paytmbank.com"
+    ],
+    "official_sender_ids": [
+      "PAYTM"
+    ]
+  }
+}

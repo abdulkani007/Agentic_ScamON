@@ -26,6 +26,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Middleware to extract X-Case-ID header and populate contextvar
+from agents.evidence_vault.agent import active_case_id_context
+
+@app.middleware("http")
+async def extract_case_id_header(request: Request, call_next):
+    case_id = request.headers.get("X-Case-ID") or ""
+    token = active_case_id_context.set(case_id)
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        active_case_id_context.reset(token)
+
 # Register endpoints router
 app.include_router(call_agent_router)
 

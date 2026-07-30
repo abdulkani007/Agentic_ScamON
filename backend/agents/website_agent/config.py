@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     SAFE_BROWSING_API_KEY: Optional[str] = None
     VIRUSTOTAL_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
+    GMAIL_USER: Optional[str] = None
+    GMAIL_APP_PASSWORD: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(

@@ -472,6 +472,29 @@ async def analyze_website(
     try:
         log_payload = response_payload.model_dump()
         log_analysis(log_payload)
+        
+        # Save to unified investigations history
+        from agents.history_helper import save_investigation
+        threat_level = "SAFE"
+        if response_payload.risk_score >= 75:
+            threat_level = "CRITICAL"
+        elif response_payload.risk_score >= 50:
+            threat_level = "HIGH"
+        elif response_payload.risk_score >= 25:
+            threat_level = "MEDIUM"
+        elif response_payload.risk_score >= 10:
+            threat_level = "LOW"
+            
+        save_investigation(
+            agent_type="website",
+            investigation_id=response_payload.investigation_id,
+            risk_score=response_payload.risk_score,
+            threat_level=threat_level,
+            input_data=response_payload.url,
+            summary=response_payload.ai_reasoning.summary,
+            full_report=log_payload,
+            recommendation=response_payload.recommendation
+        )
     except Exception as log_err:
         logger.warning(f"Failed to copy logs payload to database: {log_err}")
 
@@ -648,7 +671,344 @@ async def get_emails_history():
     except Exception as err:
         logger.error(f"Failed to fetch email scans history: {err}")
         return []
+@router.get("/api/history/complaints", tags=["Dashboard"])
+async def get_complaints_history():
+    db = get_db()
+    if db is None:
+        return []
+    try:
+        cursor = db["email_scans"].find().sort("_id", -1)
+        history = []
+        for doc in cursor:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+            history.append(doc)
+        return history
+    except Exception as err:
+        logger.error(f"Failed to fetch complaints history: {err}")
+        return []
 
+from fastapi.responses import StreamingResponse
+import io
+import csv
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+
+@router.get("/api/history", tags=["Dashboard History"])
+async def get_unified_history(
+    page: int = 1,
+    limit: int = 10,
+    agent_type: str = "All",
+    threat_level: str = "All",
+    status: str = "All",
+    risk_score: str = "All",
+    search: str = "",
+    sort_by: str = "newest",
+    case_id: Optional[str] = None,
+    source: Optional[str] = None
+):
+    db = get_db()
+    if db is None:
+        return {"items": [], "total": 0, "stats": {}}
+    try:
+        query = {}
+        if case_id:
+            query["case_id"] = case_id
+        if source:
+            query["source"] = source
+        if agent_type and agent_type != "All":
+            # Map friendly tab names to database codes
+            agent_map = {
+                "website": "website",
+                "email": "email",
+                "call analysis": "call",
+                "live call": "live_call",
+                "complaint reports": "complaint",
+                "xai summaries": "xai",
+                "threat correlation": "threat_correlation"
+            }
+            mapped_type = agent_map.get(agent_type.lower(), agent_type.lower())
+            query["agent_type"] = mapped_type
+
+        if threat_level and threat_level != "All":
+            query["threat_level"] = threat_level.upper()
+        if status and status != "All":
+            query["status"] = status.lower()
+        if risk_score and risk_score != "All":
+            if "-" in risk_score:
+                parts = risk_score.split("-")
+                query["risk_score"] = {"$gte": int(parts[0]), "$lte": int(parts[1])}
+
+        if search:
+            query["$or"] = [
+                {"input": {"$regex": search, "$options": "i"}},
+                {"investigation_id": {"$regex": search, "$options": "i"}},
+                {"summary": {"$regex": search, "$options": "i"}},
+                {"recommendation": {"$regex": search, "$options": "i"}}
+            ]
+
+        # Determine Sorting
+        sort_field = "_id"
+        sort_dir = -1
+        if sort_by == "oldest":
+            sort_dir = 1
+        elif sort_by == "highest_risk":
+            sort_field = "risk_score"
+            sort_dir = -1
+        elif sort_by == "lowest_risk":
+            sort_field = "risk_score"
+            sort_dir = 1
+
+        # Count total matching
+        total_items = db["investigations"].count_documents(query)
+
+        # Retrieve items projected (no full_report for lazy loading)
+        cursor = db["investigations"].find(query, {"full_report": 0}).sort(sort_field, sort_dir).skip((page - 1) * limit).limit(limit)
+        items = []
+        for doc in cursor:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+            items.append(doc)
+
+        # Compile statistics
+        total_all = db["investigations"].count_documents({})
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        total_today = db["investigations"].count_documents({"timestamp": {"$regex": f"^{today_str}"}})
+        
+        critical_count = db["investigations"].count_documents({"threat_level": "CRITICAL"})
+        high_count = db["investigations"].count_documents({"threat_level": "HIGH"})
+        medium_count = db["investigations"].count_documents({"threat_level": "MEDIUM"})
+        low_count = db["investigations"].count_documents({"threat_level": "LOW"})
+        safe_count = db["investigations"].count_documents({"threat_level": "SAFE"})
+
+        stats = {
+            "total": total_all,
+            "today": total_today,
+            "critical": critical_count,
+            "high": high_count,
+            "medium": medium_count,
+            "low": low_count,
+            "safe": safe_count
+        }
+
+        return {
+            "items": items,
+            "total": total_items,
+            "stats": stats
+        }
+    except Exception as err:
+        logger.error(f"Failed to fetch unified investigations history: {err}")
+        return {"items": [], "total": 0, "stats": {}}
+
+@router.get("/api/history/{investigation_id}", tags=["Dashboard History"])
+async def get_unified_investigation_details(investigation_id: str):
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection offline.")
+    try:
+        doc = db["investigations"].find_one({"investigation_id": investigation_id})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Investigation not found.")
+        doc["_id"] = str(doc["_id"])
+        return doc
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"Failed to fetch investigation details: {err}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+@router.delete("/api/history/{investigation_id}", tags=["Dashboard History"])
+async def delete_unified_investigation(investigation_id: str):
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection offline.")
+    try:
+        res = db["investigations"].delete_one({"investigation_id": investigation_id})
+        if res.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Investigation not found.")
+        return {"success": True, "message": "Investigation successfully deleted."}
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"Failed to delete investigation: {err}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+@router.delete("/api/history", tags=["Dashboard History"])
+async def delete_multiple_or_all_investigations(
+    ids: Optional[str] = None,
+    all_history: Optional[bool] = None
+):
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection offline.")
+    try:
+        if all_history:
+            db["investigations"].delete_many({})
+            return {"success": True, "message": "All investigation history has been cleared successfully."}
+        elif ids:
+            id_list = [i.strip() for i in ids.split(",") if i.strip()]
+            res = db["investigations"].delete_many({"investigation_id": {"$in": id_list}})
+            return {"success": True, "message": f"Successfully deleted {res.deleted_count} investigations."}
+        else:
+            raise HTTPException(status_code=400, detail="Either 'ids' or 'all_history' parameter must be provided.")
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"Failed to clear history: {err}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+@router.get("/api/history/{investigation_id}/export/json", tags=["Dashboard History"])
+async def export_investigation_json(investigation_id: str):
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection offline.")
+    try:
+        doc = db["investigations"].find_one({"investigation_id": investigation_id})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Investigation not found.")
+        doc["_id"] = str(doc["_id"])
+        
+        json_data = json.dumps(doc, indent=2)
+        stream = io.BytesIO(json_data.encode("utf-8"))
+        
+        return StreamingResponse(
+            stream,
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=investigation_{investigation_id}.json"}
+        )
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"JSON export failure: {err}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+@router.get("/api/history/{investigation_id}/export/csv", tags=["Dashboard History"])
+async def export_investigation_csv(investigation_id: str):
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection offline.")
+    try:
+        doc = db["investigations"].find_one({"investigation_id": investigation_id})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Investigation not found.")
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write headers
+        writer.writerow(["Investigation ID", "Agent Type", "Timestamp", "Risk Score", "Threat Level", "Input Source", "Summary", "Recommendation", "Status"])
+        # Write values
+        writer.writerow([
+            doc.get("investigation_id", ""),
+            doc.get("agent_type", ""),
+            doc.get("timestamp", ""),
+            doc.get("risk_score", 0),
+            doc.get("threat_level", ""),
+            doc.get("input", ""),
+            doc.get("summary", ""),
+            doc.get("recommendation", ""),
+            doc.get("status", "")
+        ])
+        
+        stream = io.BytesIO(output.getvalue().encode("utf-8"))
+        return StreamingResponse(
+            stream,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=investigation_{investigation_id}.csv"}
+        )
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"CSV export failure: {err}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+@router.get("/api/history/{investigation_id}/export/pdf", tags=["Dashboard History"])
+async def export_investigation_pdf(investigation_id: str):
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection offline.")
+    try:
+        doc = db["investigations"].find_one({"investigation_id": investigation_id})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Investigation not found.")
+            
+        buffer = io.BytesIO()
+        pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+        story = []
+        
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'PDFTitle',
+            parent=styles['Heading1'],
+            fontSize=22,
+            leading=26,
+            textColor=colors.HexColor('#00E676'),
+            spaceAfter=15
+        )
+        section_style = ParagraphStyle(
+            'PDFSection',
+            parent=styles['Heading2'],
+            fontSize=13,
+            leading=16,
+            textColor=colors.HexColor('#00A3FF'),
+            spaceBefore=12,
+            spaceAfter=6
+        )
+        body_style = ParagraphStyle(
+            'PDFBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor('#333333'),
+            spaceAfter=8
+        )
+        
+        story.append(Paragraph("ScamON AI Forensic Audit Report", title_style))
+        story.append(Paragraph("Unified Agent Security Assessment Log", styles['Heading3']))
+        story.append(Spacer(1, 15))
+        
+        # Metadata Table
+        data = [
+            [Paragraph("<b>Investigation ID:</b>", body_style), Paragraph(doc.get("investigation_id", ""), body_style)],
+            [Paragraph("<b>Agent Name:</b>", body_style), Paragraph(doc.get("agent_type", "").upper() + " AGENT", body_style)],
+            [Paragraph("<b>Timestamp:</b>", body_style), Paragraph(doc.get("timestamp", ""), body_style)],
+            [Paragraph("<b>Threat Level:</b>", body_style), Paragraph(doc.get("threat_level", ""), body_style)],
+            [Paragraph("<b>Risk Score:</b>", body_style), Paragraph(f"{doc.get('risk_score', 0)}/100", body_style)],
+            [Paragraph("<b>Input Scanned:</b>", body_style), Paragraph(doc.get("input", ""), body_style)]
+        ]
+        
+        t = Table(data, colWidths=[120, 400])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f5f5f5')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),
+            ('PADDING', (0,0), (-1,-1), 8),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 15))
+        
+        story.append(Paragraph("Threat Investigation Summary", section_style))
+        story.append(Paragraph(doc.get("summary", "No summary details provided."), body_style))
+        story.append(Spacer(1, 10))
+        
+        story.append(Paragraph("Security Recommendations", section_style))
+        story.append(Paragraph(doc.get("recommendation", "No recommendations provided."), body_style))
+        
+        pdf.build(story)
+        buffer.seek(0)
+        
+        return StreamingResponse(
+            buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=investigation_{investigation_id}.pdf"}
+        )
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"PDF export failure: {err}")
+        raise HTTPException(status_code=500, detail=str(err))
 
 @router.get("/api/blocked-websites", tags=["Dashboard"])
 async def get_blocked_websites_history():
@@ -677,7 +1037,8 @@ async def get_dashboard_stats():
             "high_risk_websites": 0,
             "blocked_websites": 0,
             "safe_websites": 0,
-            "investigations_today": 0
+            "investigations_today": 0,
+            "total_complaints": 0
         }
     try:
         total_web = db["website_scans"].count_documents({})
@@ -703,7 +1064,8 @@ async def get_dashboard_stats():
             "high_risk_websites": high_risk_websites,
             "blocked_websites": blocked_websites,
             "safe_websites": safe_websites,
-            "investigations_today": investigations_today
+            "investigations_today": investigations_today,
+            "total_complaints": total_emails
         }
     except Exception as err:
         logger.error(f"Failed to compile dashboard stats: {err}")
@@ -712,7 +1074,8 @@ async def get_dashboard_stats():
             "high_risk_websites": 0,
             "blocked_websites": 0,
             "safe_websites": 0,
-            "investigations_today": 0
+            "investigations_today": 0,
+            "total_complaints": 0
         }
 
 
@@ -901,4 +1264,295 @@ async def api_delete_blocked_website(id: str) -> WebsiteActionResponse:
     except Exception as err:
         logger.error(f"Failed to delete website entry: {err}")
         return WebsiteActionResponse(success=False, message=f"Internal error: {str(err)}")
+
+
+# --- ScamON AI Assistant Chat API ---
+import json
+import requests
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class WebsiteChatRequest(BaseModel):
+    report: Dict[str, Any]
+    message: str
+    history: List[ChatMessage]
+
+
+def compile_assistant_context(report: Dict[str, Any]) -> str:
+    url = report.get("url", "N/A")
+    risk_score = report.get("risk_score", "N/A")
+    
+    # Final decision or verdict
+    ai_reason = report.get("ai_reasoning", {})
+    threat_level = ai_reason.get("final_decision", report.get("threat_type", "N/A"))
+    
+    # Domain info
+    domain_data = report.get("domain", {})
+    domain_age = f"{domain_data.get('age_days', 'N/A')} days"
+    whois_info = f"Registrar: {domain_data.get('registrar', 'N/A')}, Name: {domain_data.get('name', 'N/A')}"
+    
+    # SSL status
+    ssl_data = report.get("ssl", {})
+    ssl_status = f"Valid: {ssl_data.get('valid', 'N/A')}, Issuer: {ssl_data.get('issuer', 'N/A')}, Expiry: {ssl_data.get('expiry', 'N/A')}"
+    
+    # DNS Information
+    modules = report.get("investigation_modules", [])
+    dns_module = next((m for m in modules if m.get("module") == "DNS Resolution"), {})
+    dns_info = str(dns_module.get("evidence", "N/A"))
+    
+    # VirusTotal Result
+    vt_module = next((m for m in modules if m.get("module") == "VirusTotal"), {})
+    virustotal_result = str(vt_module.get("evidence", "N/A"))
+    
+    # Brand Impersonation Result
+    typo_data = report.get("typosquat", {})
+    brand_impersonation_result = f"Detected typosquatting: {typo_data.get('detected', 'N/A')}, Original brand: {typo_data.get('original_brand', 'N/A')}, Similarity: {typo_data.get('similarity', 'N/A')}%"
+    
+    # Phishing Indicators
+    phishing_indicators = ", ".join(ai_reason.get("reasoning_steps", []))
+    
+    # Malware Detection (Google Safe Browsing & VirusTotal)
+    gsb_module = next((m for m in modules if m.get("module") == "Google Safe Browsing"), {})
+    malware_detection = f"Google Safe Browsing: {gsb_module.get('evidence', 'N/A')}. VirusTotal: {virustotal_result}"
+    
+    # Redirect Chain
+    redirect_chain = " -> ".join(report.get("redirect_history", []))
+    
+    # Suspicious Scripts
+    html_metadata = report.get("html_metadata", {})
+    suspicious_scripts = f"HTML Meta tags: {html_metadata}"
+    
+    # Reasons
+    reasons = ai_reason.get("summary", "N/A")
+    
+    # Recommendations
+    recommendations = report.get("recommendation", ai_reason.get("recommended_action", "N/A"))
+    
+    context = f"""Website URL: {url}
+Risk Score: {risk_score}%
+Threat Level: {threat_level}
+Domain Age: {domain_age}
+WHOIS Info: {whois_info}
+SSL Status: {ssl_status}
+DNS Information: {dns_info}
+VirusTotal Result: {virustotal_result}
+Brand Impersonation Result: {brand_impersonation_result}
+Phishing Indicators: {phishing_indicators}
+Malware Detection: {malware_detection}
+Redirect Chain: {redirect_chain}
+Suspicious Scripts: {suspicious_scripts}
+Reasons: {reasons}
+Recommendations: {recommendations}"""
+    return context
+
+
+def get_assistant_stream(messages: List[Dict[str, str]]):
+    # Groq API configuration
+    GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    
+    if not GROQ_API_KEY:
+        yield "Error: GROQ_API_KEY environment variable is not configured."
+        return
+        
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    
+    body = {
+        "model": "llama-3.1-8b-instant",
+        "messages": messages,
+        "temperature": 0.2,
+        "stream": True,
+        "max_tokens": 1000,
+    }
+    
+    try:
+        response = requests.post(GROQ_API_URL, headers=headers, json=body, stream=True, timeout=10)
+        response.raise_for_status()
+        for line in response.iter_lines():
+            if line:
+                line_str = line.decode('utf-8')
+                if line_str.startswith('data: '):
+                    data_str = line_str[6:]
+                    if data_str.strip() == '[DONE]':
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        content = data['choices'][0]['delta'].get('content', '')
+                        if content:
+                            yield content
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.error(f"Error in Groq assistant chat stream: {e}")
+        yield f"Error communicating with AI service: {str(e)}"
+
+
+@router.post(
+    "/api/websites/chat",
+    summary="Streams answers about the currently analyzed website based on the investigation report.",
+    tags=["Chat API"]
+)
+async def api_website_chat(payload: WebsiteChatRequest):
+    # 1. Compile the investigation context
+    report_context = compile_assistant_context(payload.report)
+    
+    # 2. Formulate the system instructions
+    system_prompt = f"""You are the 🤖 ScamON AI Assistant, an expert cyber threat analysis bot.
+Your ONLY role is to answer questions about the website currently under investigation.
+You must use the Website Investigation Report below as your sole source of truth.
+
+Website Investigation Report:
+{report_context}
+
+CRITICAL INSTRUCTIONS:
+1. ONLY answer questions related to the currently analyzed website.
+2. If the user asks anything unrelated to this website analysis (such as general knowledge, other websites, programming, hobbies, general conversation like 'how is the weather' or 'what is the capital of Spain'), you MUST refuse to answer and reply EXACTLY with:
+"I can only answer questions related to the website currently being analyzed."
+3. You must use simple, beginner-friendly language and explain any technical details clearly without jargon unless requested.
+4. You MUST structure EVERY response using the following format:
+### Summary
+[Write a brief summary of safety or issue]
+
+### Reason
+[Explain the main reason(s) why this status exists]
+
+### Evidence
+- [Bullet point detailing specific evidence]
+- [Another bullet point]
+
+### Recommendation
+[Cybersecurity advice for the user]
+
+### Confidence Score
+[Confidence percentage based on data, e.g. 95%]
+
+5. If the website is unsafe, prefix your response with "⚠ Unsafe Website" or similar. If it is safe, prefix with "✅ Safe Website"."""
+
+    # 3. Build messages list including system prompt and conversational memory
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    # Append conversation history
+    for msg in payload.history:
+        messages.append({"role": msg.role, "content": msg.content})
+        
+    # Append the current message
+    messages.append({"role": "user", "content": payload.message})
+    
+    return StreamingResponse(get_assistant_stream(messages), media_type="text/plain")
+
+
+class ComplaintGenerateRequest(BaseModel):
+    report: Optional[Dict[str, Any]] = None
+    case_id: Optional[str] = None
+
+
+class ComplaintSendRequest(BaseModel):
+    to: str
+    cc: Optional[str] = ""
+    subject: str
+    body: str
+    attachments: List[str]
+
+
+@router.post("/api/complaints/generate", tags=["Complaints"])
+async def api_generate_complaint(payload: ComplaintGenerateRequest):
+    static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static"))
+    try:
+        report_data = payload.report
+        
+        # If case_id is passed, retrieve Case Folder from Evidence Vault
+        if payload.case_id:
+            db = get_db()
+            if db is not None:
+                case_doc = db["cases"].find_one({"case_id": payload.case_id})
+                if case_doc:
+                    evidence = case_doc.get("evidence", {})
+                    report_data = {}
+                    if "website" in evidence:
+                        report_data.update(evidence["website"].get("data", {}))
+                    if "email" in evidence:
+                        report_data.update(evidence["email"].get("data", {}))
+                    if "call" in evidence:
+                        report_data.update(evidence["call"].get("data", {}))
+                    if "sms" in evidence:
+                        sms_data = evidence["sms"].get("data", {})
+                        report_data["sms_sender"] = sms_data.get("sms", {}).get("sender") or sms_data.get("sender")
+                        report_data["sms_message"] = sms_data.get("sms", {}).get("message") or sms_data.get("message")
+                        report_data["sms_risk_score"] = sms_data.get("analysis", {}).get("risk_score") or sms_data.get("risk_score") or 0
+                        report_data["sms_recommendation"] = sms_data.get("analysis", {}).get("recommended_action") or sms_data.get("recommendation")
+                    if "visual_scam" in evidence:
+                        report_data["visual_scam"] = evidence["visual_scam"].get("data", {})
+                    
+                    report_data["case_id"] = payload.case_id
+                    
+        if not report_data:
+            raise HTTPException(status_code=400, detail="No report data or Case Folder found.")
+            
+        from .complaint_builder import generate_complaint_package
+        result = generate_complaint_package(report_data, static_dir)
+        
+        # Update case status in vault
+        if payload.case_id:
+            db = get_db()
+            if db is not None:
+                db["cases"].update_one(
+                    {"case_id": payload.case_id},
+                    {"$set": {
+                        "status": "Complaint Generated",
+                        "reports.complaint": result,
+                        "updated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+                    }}
+                )
+        return result
+    except Exception as err:
+        logger.error(f"Failed to generate complaint: {err}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate complaint documentation: {str(err)}"
+        )
+
+
+@router.post("/api/complaints/send", tags=["Complaints"])
+async def api_send_complaint(payload: ComplaintSendRequest):
+    static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static"))
+    try:
+        from .complaint_builder import send_complaint_email
+        result = send_complaint_email(
+            to_email=payload.to,
+            cc_email=payload.cc,
+            subject=payload.subject,
+            body=payload.body,
+            attachment_paths=payload.attachments,
+            static_dir=static_dir
+        )
+        return result
+    except Exception as err:
+        logger.error(f"Failed to send complaint: {err}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(err)
+        )
+
+
+@router.get("/api/history/complaints", tags=["Complaints"])
+async def get_complaints_history():
+    db = get_db()
+    if db is None:
+        return []
+    try:
+        complaints = list(db["email_scans"].find({}).sort("created_at", -1).limit(10))
+        for c in complaints:
+            c["_id"] = str(c["_id"])
+        return complaints
+    except Exception as err:
+        logger.error(f"Failed to fetch complaints history: {err}")
+        return []
+
 
