@@ -8,6 +8,15 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import LiveCallDetector from './LiveCallDetector';
 import LandingPage from './LandingPage';
+import { 
+  auth, 
+  googleProvider, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  signOut,
+  onAuthStateChanged 
+} from './firebase';
 
 const renderVisualEvidence = (isLoading, result) => {
   if (isLoading) {
@@ -197,13 +206,119 @@ const Typewriter = ({ text, delay = 50, onComplete }) => {
   return <span>{currentText}</span>;
 };
 
+const BootScreen = ({ onComplete }) => {
+  const [bootStep, setBootStep] = useState(0);
+  const bootLogs = [
+    { text: "INITIALIZING SOC THREAT ARCHITECTURE...", delay: 150 },
+    { text: "PLANNER: Establishing secure replica connection...", delay: 250 },
+    { text: "Loading Master Orchestrator Agent (PID 43900)... OK", delay: 200 },
+    { text: "Loading Website Investigation Agent (Port 8001)... OK", delay: 150 },
+    { text: "Loading Email Investigation Agent (Port 8001)... OK", delay: 150 },
+    { text: "Loading SMS Investigation Agent (Status: Passive Collector Active)... OK", delay: 200 },
+    { text: "Loading Call Analysis Agent (Port 8000)... OK", delay: 150 },
+    { text: "Loading Visual Investigation Agent... OK", delay: 150 },
+    { text: "Connecting Evidence Vault Decryptor... OK", delay: 200 },
+    { text: "Synchronizing Threat Correlation logs... OK", delay: 150 },
+    { text: "COMPILING DASHBOARD CONSOLE STATE...", delay: 200 }
+  ];
+
+  useEffect(() => {
+    let currentStep = 0;
+    const runBoot = () => {
+      if (currentStep < bootLogs.length) {
+        setBootStep(currentStep + 1);
+        const nextDelay = bootLogs[currentStep].delay;
+        currentStep += 1;
+        setTimeout(runBoot, nextDelay);
+      } else {
+        setTimeout(onComplete, 400);
+      }
+    };
+    runBoot();
+  }, []);
+
+  return (
+    <div style={{
+      width: '100vw',
+      height: '100vh',
+      backgroundColor: '#05070A',
+      color: '#00E676',
+      fontFamily: 'monospace',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+      boxSizing: 'border-box'
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '640px',
+        border: '1px solid rgba(0, 230, 118, 0.3)',
+        background: 'rgba(5, 7, 10, 0.85)',
+        boxShadow: '0 0 30px rgba(0, 230, 118, 0.1)',
+        padding: '30px',
+        boxSizing: 'border-box'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,230,118,0.2)', paddingBottom: '12px', marginBottom: '20px' }}>
+          <span style={{ fontSize: '11px', letterSpacing: '2px', fontWeight: 'bold' }}>[SCAMON SOC CONSOLE BOOT]</span>
+          <span className="animate-pulse" style={{ fontSize: '11px', color: '#fff' }}>SYSTEM INITIALIZING</span>
+        </div>
+        <div style={{ height: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', textAlign: 'left', lineHeight: '1.5' }}>
+          {bootLogs.slice(0, bootStep).map((log, idx) => (
+            <div key={idx} style={{ color: log.text.includes("OK") ? '#00E676' : '#fff' }}>
+              <span style={{ color: 'rgba(0, 230, 118, 0.5)', marginRight: '8px' }}>❯</span>
+              {log.text}
+            </div>
+          ))}
+          {bootStep < bootLogs.length && (
+            <div className="animate-pulse" style={{ color: '#00E676' }}>
+              <span style={{ marginRight: '8px' }}>❯</span>█
+            </div>
+          )}
+        </div>
+        <div style={{ marginTop: '30px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(0, 230, 118, 0.7)', marginBottom: '6px' }}>
+            <span>LOADING AGENT REGISTRIES...</span>
+            <span>{Math.round((bootStep / bootLogs.length) * 100)}%</span>
+          </div>
+          <div style={{ height: '8px', background: 'rgba(0, 230, 118, 0.05)', border: '1px solid rgba(0, 230, 118, 0.2)', padding: '2px' }}>
+            <div style={{
+              height: '100%',
+              backgroundColor: '#00E676',
+              width: `${(bootStep / bootLogs.length) * 100}%`,
+              transition: 'width 0.2s ease-out'
+            }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   // Sidebar State
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // Navigation State
-  const [activeNav, setActiveNav] = useState('Web & QR Scan');
-  const [view, setView] = useState('landing');
+  const [activeNav, setActiveNav] = useState(() => localStorage.getItem('scamon_activeNav') || 'Dashboard');
+  const [view, setView] = useState(() => localStorage.getItem('scamon_view') || 'landing');
+
+  useEffect(() => {
+    localStorage.setItem('scamon_view', view);
+  }, [view]);
+
+  useEffect(() => {
+    localStorage.setItem('scamon_activeNav', activeNav);
+  }, [activeNav]);
+
+  // Firebase Auth State
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
 
   // Sidebar Search and Expand States
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
@@ -215,6 +330,30 @@ export default function App() {
   });
 
   // Master Agent Orchestrator States
+  const [copilotMessages, setCopilotMessages] = useState([]);
+  const [chats, setChats] = useState([
+    { id: 'default', title: 'New Threat Investigation', messages: [] }
+  ]);
+  const [currentChatId, setCurrentChatId] = useState('default');
+
+  useEffect(() => {
+    setChats(prev => prev.map(c => {
+      if (c.id === currentChatId) {
+        let newTitle = c.title;
+        if (c.title === 'New Threat Investigation' || c.title === 'New Chat') {
+          const firstUserMsg = copilotMessages.find(m => m.role === 'user');
+          if (firstUserMsg) {
+            newTitle = firstUserMsg.content.slice(0, 24) + (firstUserMsg.content.length > 24 ? '...' : '');
+          }
+        }
+        return { ...c, title: newTitle, messages: copilotMessages };
+      }
+      return c;
+    }));
+  }, [copilotMessages, currentChatId]);
+
+  const [copilotLoading, setCopilotLoading] = useState(false);
+  const [copilotGmailAuthUrl, setCopilotGmailAuthUrl] = useState(null);
   const [masterInputText, setMasterInputText] = useState('');
   const [masterAttachedFile, setMasterAttachedFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -237,6 +376,230 @@ export default function App() {
   const [analyzeButtonPulse, setAnalyzeButtonPulse] = useState(null);
   const [activeTransition, setActiveTransition] = useState(false);
   const [activeJunctionIndex, setActiveJunctionIndex] = useState(-1);
+
+  const getJunctionCoords = () => {
+    if (routingState.type === 'url') return { x1: 250, y1: 104, x2: 280, y2: 48 };
+    if (routingState.type === 'email') return { x1: 250, y1: 138, x2: 280, y2: 108 };
+    if (routingState.type === 'sms') return { x1: 250, y1: 174, x2: 280, y2: 168 };
+    if (routingState.type === 'audio') return { x1: 250, y1: 199, x2: 280, y2: 228 };
+    if (routingState.type === 'image') return { x1: 250, y1: 244, x2: 280, y2: 288 };
+    return null;
+  };
+
+  const smartButtonStyle = {
+    background: 'rgba(2, 3, 5, 0.75)',
+    border: '1px solid #00E676',
+    color: '#00E676',
+    padding: '4px 10px',
+    borderRadius: '4px',
+    fontSize: '11px',
+    fontFamily: 'monospace',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 0 5px rgba(0, 230, 118, 0.1)',
+    marginTop: '6px',
+    width: 'fit-content'
+  };
+
+  const smartButtonHoverEnter = (e) => {
+    e.currentTarget.style.background = '#00E676';
+    e.currentTarget.style.color = '#020305';
+    e.currentTarget.style.boxShadow = '0 0 12px #00E676';
+  };
+
+  const smartButtonHoverLeave = (e) => {
+    e.currentTarget.style.background = 'rgba(2, 3, 5, 0.75)';
+    e.currentTarget.style.color = '#00E676';
+    e.currentTarget.style.boxShadow = '0 0 5px rgba(0, 230, 118, 0.1)';
+  };
+
+  const handleSelectChat = (chatId) => {
+    const selected = chats.find(c => c.id === chatId);
+    if (selected) {
+      setCurrentChatId(chatId);
+      setCopilotMessages(selected.messages || []);
+      setRoutingState({ active: false, input: '', file: null, type: null, target: null });
+    }
+  };
+
+  const handleNewChat = () => {
+    const newId = 'chat_' + Date.now();
+    const newChatObj = {
+      id: newId,
+      title: 'New Chat',
+      messages: []
+    };
+    setChats(prev => [newChatObj, ...prev]);
+    setCurrentChatId(newId);
+    setCopilotMessages([]);
+    setRoutingState({ active: false, input: '', file: null, type: null, target: null });
+  };
+
+  const handleDeleteChat = (e, chatId) => {
+    e.stopPropagation();
+    if (chats.length <= 1) {
+      setCopilotMessages([]);
+      setChats([{ id: 'default', title: 'New Threat Investigation', messages: [] }]);
+      setCurrentChatId('default');
+      setRoutingState({ active: false, input: '', file: null, type: null, target: null });
+      return;
+    }
+    const filtered = chats.filter(c => c.id !== chatId);
+    setChats(filtered);
+    if (currentChatId === chatId) {
+      const fallback = filtered[0];
+      setCurrentChatId(fallback.id);
+      setCopilotMessages(fallback.messages || []);
+      setRoutingState({ active: false, input: '', file: null, type: null, target: null });
+    }
+  };
+
+  const getCleanAuthError = (errorMsg) => {
+    if (!errorMsg) return '';
+    const lower = errorMsg.toLowerCase();
+    if (lower.includes('internal-error') || lower.includes('network-request-failed') || lower.includes('network') || lower.includes('failed to fetch')) {
+      return "NETWORK_ERROR: Unable to connect to authorization servers. Please verify your internet connection.";
+    }
+    if (lower.includes('invalid-credential') || lower.includes('wrong-password') || lower.includes('user-not-found')) {
+      return "CREDENTIAL_ERROR: Incorrect terminal ID or password.";
+    }
+    if (lower.includes('invalid-email')) {
+      return "EMAIL_ERROR: The email address format is invalid.";
+    }
+    if (lower.includes('weak-password')) {
+      return "PASSWORD_ERROR: Password must be at least 6 characters long.";
+    }
+    if (lower.includes('email-already-in-use')) {
+      return "REGISTRATION_ERROR: This Terminal ID is already registered.";
+    }
+    return errorMsg.replace("Firebase: ", "");
+  };
+
+  // Firebase auth status subscription
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleEmailLogin = async (e) => {
+    e.preventDefault();
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setAuthError("Email and password are required.");
+      return;
+    }
+    setAuthError('');
+    try {
+      await signInWithEmailAndPassword(auth, authEmail, authPassword);
+    } catch (err) {
+      setAuthError(err.message.replace("Firebase:", ""));
+    }
+  };
+
+  const handleEmailSignup = async (e) => {
+    e.preventDefault();
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setAuthError("Email and password are required.");
+      return;
+    }
+    setAuthError('');
+    try {
+      await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+    } catch (err) {
+      setAuthError(err.message.replace("Firebase:", ""));
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setAuthError('');
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      setAuthError(err.message.replace("Firebase:", ""));
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      localStorage.removeItem('scamon_view');
+      localStorage.removeItem('scamon_activeNav');
+      setView('landing');
+    } catch (err) {
+      console.error("Sign out error", err);
+    }
+  };
+
+  const triggerCrossAgentRouting = (text, file, type, target) => {
+    // Switch to Dashboard to display routing motherboard animation
+    setActiveNav('Dashboard');
+    
+    setRoutingState({
+      active: true,
+      input: text,
+      file: file,
+      type: type,
+      target: target
+    });
+
+    const storedInput = text;
+    const storedFile = file;
+
+    setActiveJunctionIndex(0);
+    setTimeout(() => setActiveJunctionIndex(1), 500);
+    setTimeout(() => setActiveJunctionIndex(2), 1000);
+    setTimeout(() => setActiveJunctionIndex(3), 1500);
+    setTimeout(() => setActiveJunctionIndex(4), 2000);
+
+    setTimeout(() => {
+      setActiveJunctionIndex(-1);
+      
+      if (type === 'email') {
+        setRoutingState({
+          active: false,
+          input: '',
+          file: null,
+          type: null,
+          target: null
+        });
+        triggerCopilotEmailSearch(storedInput, storedFile);
+      } else {
+        setActiveTransition(true);
+        setTimeout(() => {
+          setActiveNav(target);
+          setActiveTransition(false);
+          
+          let targetField = null;
+          if (type === 'url') targetField = 'webUrlText';
+          else if (type === 'sms') targetField = 'smsMessage';
+          else if (type === 'image') targetField = 'visualFile';
+          else if (type === 'audio') targetField = 'callSelectedFile';
+
+          setTypingState({
+            active: true,
+            text: storedInput,
+            targetField: targetField,
+            file: storedFile
+          });
+        }, 400);
+
+        setRoutingState({
+          active: false,
+          input: '',
+          file: null,
+          type: null,
+          target: null
+        });
+      }
+    }, 2800);
+  };
 
   // API Logs & Settings Simulated States
   const [apiLogsSearch, setApiLogsSearch] = useState('');
@@ -272,6 +635,348 @@ export default function App() {
     email_alert: true,
     correlation_push: true
   });
+
+  const copilotChatEndRef = useRef(null);
+  useEffect(() => {
+    if (copilotChatEndRef.current) {
+      copilotChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [copilotMessages, copilotLoading]);
+
+  const triggerCopilotEmailSearch = async (text, file = null, skipUserAppend = false) => {
+    let currentUserMsg = null;
+    if (!skipUserAppend) {
+      currentUserMsg = {
+        id: 'msg_' + Date.now() + '_user',
+        role: 'user',
+        content: text,
+        file: file ? { name: file.name, size: file.size } : null,
+        timestamp: new Date().toLocaleTimeString()
+      };
+    }
+
+    const assistantMsgId = 'msg_' + (Date.now() + 1) + '_assistant';
+    const assistantMsg = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      status: 'Thinking...',
+      logs: [],
+      payload: null,
+      timestamp: new Date().toLocaleTimeString()
+    };
+
+    if (currentUserMsg) {
+      setCopilotMessages(prev => [...prev, currentUserMsg, assistantMsg]);
+    } else {
+      setCopilotMessages(prev => [...prev, assistantMsg]);
+    }
+    
+    setCopilotLoading(true);
+
+    let historyPayload = [];
+    if (currentUserMsg) {
+      historyPayload = [
+        ...copilotMessages.map(msg => ({
+          role: msg.role,
+          content: msg.content || "",
+          payload: msg.payload
+        })),
+        { role: 'user', content: text }
+      ];
+    } else {
+      historyPayload = copilotMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content || "",
+        payload: msg.payload
+      }));
+    }
+
+    const formData = new FormData();
+    if (text) formData.append('message', text);
+    formData.append('history', JSON.stringify(historyPayload));
+    if (file) formData.append('file', file);
+
+    try {
+      const activeCaseId = localStorage.getItem('activeCaseId') || '';
+      const response = await fetch('http://localhost:8001/api/copilot/chat', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-Case-ID': activeCaseId
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsedEvent = JSON.parse(line);
+            
+            if (parsedEvent.type === 'status') {
+              setCopilotMessages(prev => prev.map(msg => 
+                msg.id === assistantMsgId ? { ...msg, status: parsedEvent.content } : msg
+              ));
+            } else if (parsedEvent.type === 'log') {
+              const logItem = parsedEvent.log || parsedEvent;
+              setCopilotMessages(prev => prev.map(msg => 
+                msg.id === assistantMsgId ? { ...msg, logs: [...msg.logs, logItem] } : msg
+              ));
+            } else if (parsedEvent.type === 'text') {
+              setCopilotMessages(prev => prev.map(msg => 
+                msg.id === assistantMsgId ? { ...msg, content: msg.content + parsedEvent.content } : msg
+              ));
+            } else if (parsedEvent.type === 'data') {
+              setCopilotMessages(prev => prev.map(msg => 
+                msg.id === assistantMsgId ? { ...msg, payload: parsedEvent.payload } : msg
+              ));
+            } else if (parsedEvent.type === 'error') {
+              setCopilotMessages(prev => prev.map(msg => 
+                msg.id === assistantMsgId ? { ...msg, content: msg.content + `\n\nError: ${parsedEvent.content}` } : msg
+              ));
+              if (parsedEvent.code === 'GMAIL_DISCONNECTED') {
+                setCopilotGmailAuthUrl(parsedEvent.auth_url);
+              }
+            }
+          } catch (e) {
+            console.error("Error parsing stream line:", e);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Copilot stream error:", err);
+      setCopilotMessages(prev => prev.map(msg => 
+        msg.id === assistantMsgId ? { ...msg, content: msg.content + `\n\nFailed to communicate with Security Copilot: ${err.message}` } : msg
+      ));
+    } finally {
+      setCopilotMessages(prev => prev.map(msg => 
+        msg.id === assistantMsgId ? { ...msg, status: '' } : msg
+      ));
+      setCopilotLoading(false);
+    }
+  };
+
+  const renderCopilotPayload = (payload) => {
+    if (!payload) return null;
+    
+    // 1. Gmail List Render
+    if (payload.emails && Array.isArray(payload.emails)) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px', width: '100%' }}>
+          <div style={{ fontSize: '11px', color: 'var(--accent-green)', fontWeight: 'bold', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            📥 Latest Gmail Inbox Scan ({payload.emails.length} items)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {payload.emails.map((email, idx) => (
+              <div 
+                key={email.id || idx} 
+                style={{ 
+                  background: 'rgba(5, 7, 10, 0.75)', 
+                  border: '1px solid rgba(0, 230, 118, 0.15)', 
+                  padding: '14px 16px', 
+                  borderRadius: '3px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '12.5px', color: '#fff', fontFamily: 'monospace', textAlign: 'left' }}>
+                    <strong style={{ color: 'var(--text-muted)' }}>From:</strong> {email.from_name || email.from || 'Unknown Sender'}
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#fff', fontFamily: 'monospace', textAlign: 'left' }}>
+                    <strong style={{ color: 'var(--text-muted)' }}>Subject:</strong> <span style={{ color: '#00E676' }}>{email.subject || 'No Subject'}</span>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#fff', fontFamily: 'monospace', textAlign: 'left' }}>
+                    <strong style={{ color: 'var(--text-muted)' }}>Time:</strong> {email.date || 'No Date'}
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#fff', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
+                    <strong style={{ color: 'var(--text-muted)' }}>Preview:</strong> {email.snippet || 'No snippet preview...'}
+                  </div>
+                  {/* Cross-Agent Smart Actions */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    {(email.snippet && (email.snippet.includes('http://') || email.snippet.includes('https://') || email.snippet.includes('www.') || email.snippet.includes('.com'))) && (
+                      <button 
+                        onClick={() => {
+                          const urlMatch = email.snippet.match(/(https?:\/\/[^\s]+)/) || [null, 'https://company.com'];
+                          triggerCrossAgentRouting(urlMatch[0] || 'https://company.com', null, 'url', 'Web & QR Scan');
+                        }}
+                        style={smartButtonStyle}
+                        onMouseEnter={smartButtonHoverEnter}
+                        onMouseLeave={smartButtonHoverLeave}
+                      >
+                        [WEB] Analyze Website
+                      </button>
+                    )}
+                    {(email.snippet && (email.snippet.toLowerCase().includes('image') || email.snippet.toLowerCase().includes('screenshot') || email.snippet.toLowerCase().includes('invoice') || email.snippet.toLowerCase().includes('photo') || email.snippet.toLowerCase().includes('receipt'))) && (
+                      <button 
+                        onClick={() => {
+                          const mockFile = new File([""], "email_attachment_image.png", { type: "image/png" });
+                          triggerCrossAgentRouting('', mockFile, 'image', 'Visual Investigation');
+                        }}
+                        style={smartButtonStyle}
+                        onMouseEnter={smartButtonHoverEnter}
+                        onMouseLeave={smartButtonHoverLeave}
+                      >
+                        [VISUAL] Analyze Image
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <button 
+                  onClick={() => triggerCopilotEmailSearch(`Analyze email ${idx + 1}`)}
+                  style={{
+                    padding: '6px 12px',
+                    background: 'rgba(0, 230, 118, 0.08)',
+                    border: '1px solid #00E676',
+                    color: '#00E676',
+                    fontSize: '10px',
+                    fontFamily: 'monospace',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    borderRadius: '2px',
+                    textTransform: 'uppercase',
+                    transition: 'all 0.2s',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = '#00E676';
+                    e.currentTarget.style.color = '#020305';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'rgba(0, 230, 118, 0.08)';
+                    e.currentTarget.style.color = '#00E676';
+                  }}
+                >
+                  ANALYZE
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    
+    // 2. Email Forensics Detail Card
+    if (payload.classification && (payload.sender || payload.subject)) {
+      const riskColor = payload.classification === 'Phishing' ? '#FF3D00' : payload.classification === 'Suspicious' ? '#FFC400' : '#00E676';
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '12px', background: 'rgba(0,0,0,0.3)', border: `1px solid ${riskColor}`, padding: '16px', borderRadius: '4px', width: '100%', boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#fff', fontFamily: 'monospace', letterSpacing: '0.8px' }}>
+              🔬 EMAIL FORENSIC AUDIT REPORT
+            </span>
+            <span style={{ fontSize: '10px', padding: '2px 8px', fontWeight: 'bold', background: `${riskColor}15`, border: `1px solid ${riskColor}`, color: riskColor, fontFamily: 'monospace' }}>
+              {payload.classification.toUpperCase()}
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12px', fontFamily: 'monospace' }}>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>From:</span> <span style={{ color: '#fff' }}>{payload.sender}</span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>Date:</span> <span style={{ color: '#fff' }}>{payload.date || 'N/A'}</span>
+            </div>
+            <div style={{ gridColumn: 'span 2' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Subject:</span> <span style={{ color: '#00E676', fontWeight: 'bold' }}>{payload.subject}</span>
+            </div>
+          </div>
+
+          {/* Validation Metrics */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', fontFamily: 'monospace', fontWeight: 'bold' }}>Authentication Check</div>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              {['spf', 'dkim', 'dmarc'].map(check => {
+                const pass = payload[check] === 'PASS' || payload[check] === true;
+                const statusColor = pass ? '#00E676' : '#FF3D00';
+                return (
+                  <div key={check} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.2)', padding: '4px 10px', border: `1px solid rgba(255,255,255,0.06)` }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: statusColor }} />
+                    <span style={{ fontSize: '10.5px', color: '#fff', fontFamily: 'monospace' }}>
+                      {check.toUpperCase()}: <strong style={{ color: statusColor }}>{pass ? 'PASS' : 'FAIL'}</strong>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Links & Attachments Summary */}
+          {((payload.links && payload.links.length > 0) || (payload.attachments && payload.attachments.length > 0)) && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px', fontSize: '11px', fontFamily: 'monospace' }}>
+              <div>
+                <div style={{ color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 'bold' }}>Detected URLs ({payload.links?.length || 0})</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
+                  {payload.links?.map((link, idx) => (
+                    <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+                      <div style={{ color: link.risk === 'High' ? '#FF3D00' : 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        🔗 {link.url} ({link.risk || 'Unknown'} Risk)
+                      </div>
+                      <button 
+                        onClick={() => triggerCrossAgentRouting(link.url, null, 'url', 'Web & QR Scan')}
+                        style={smartButtonStyle}
+                        onMouseEnter={smartButtonHoverEnter}
+                        onMouseLeave={smartButtonHoverLeave}
+                      >
+                        [WEB] Analyze Website
+                      </button>
+                    </div>
+                  )) || <div style={{ color: 'var(--text-muted)' }}>None</div>}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 'bold' }}>Attachments ({payload.attachments?.length || 0})</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
+                  {payload.attachments?.map((att, idx) => (
+                    <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+                      <div style={{ color: att.malicious ? '#FF3D00' : '#00E676' }}>
+                        📦 {att.filename} ({att.malicious ? 'Malicious' : 'Safe'})
+                      </div>
+                      {(att.filename.toLowerCase().endsWith('.png') || att.filename.toLowerCase().endsWith('.jpg') || att.filename.toLowerCase().endsWith('.jpeg') || att.filename.toLowerCase().endsWith('.webp')) && (
+                        <button 
+                          onClick={() => {
+                            const mockFile = new File([""], att.filename, { type: "image/png" });
+                            triggerCrossAgentRouting('', mockFile, 'image', 'Visual Investigation');
+                          }}
+                          style={smartButtonStyle}
+                          onMouseEnter={smartButtonHoverEnter}
+                          onMouseLeave={smartButtonHoverLeave}
+                        >
+                          [VISUAL] Analyze Image
+                        </button>
+                      )}
+                    </div>
+                  )) || <div style={{ color: 'var(--text-muted)' }}>None</div>}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return null;
+  };
 
   useEffect(() => {
     if (activeNav !== 'API Logs') return;
@@ -1123,6 +1828,14 @@ export default function App() {
   };
 
   const getStatusText = () => {
+    if (routingState.type === 'email') {
+      if (activeJunctionIndex <= 0) return "Thinking...";
+      if (activeJunctionIndex === 1) return "Understanding Request...";
+      if (activeJunctionIndex === 2) return "Routing to Email Investigation Agent...";
+      if (activeJunctionIndex === 3) return "Fetching Gmail...";
+      if (activeJunctionIndex === 4) return "Receiving latest emails...";
+      return "Done";
+    }
     if (activeJunctionIndex <= 0) return "INITIALIZING ORCHESTRATION CORE...";
     if (activeJunctionIndex === 1) return "PREPARING INVESTIGATION DETECTORS...";
     if (activeJunctionIndex === 2) return "ESTABLISHING CIRCUIT NODE BENDS...";
@@ -1132,10 +1845,11 @@ export default function App() {
   };
 
   const getActivePathD = () => {
-    if (routingState.type === 'url') return 'M 80 120 L 160 120 Q 180 120 180 100 L 180 60 Q 180 40 200 40 L 400 40';
-    if (routingState.type === 'sms') return 'M 80 120 L 160 120 Q 180 120 180 110 L 180 100 Q 180 90 200 90 L 400 90';
-    if (routingState.type === 'audio') return 'M 80 120 L 160 120 Q 180 120 180 130 L 180 140 Q 180 150 200 150 L 400 150';
-    if (routingState.type === 'image') return 'M 80 120 L 160 120 Q 180 120 180 140 L 180 180 Q 180 200 200 200 L 400 200';
+    if (routingState.type === 'url') return 'M 100 180 L 220 180 Q 250 180 250 140 L 250 68 Q 250 48 280 48 L 580 48';
+    if (routingState.type === 'email') return 'M 100 180 L 220 180 Q 250 180 250 150 L 250 128 Q 250 108 280 108 L 580 108';
+    if (routingState.type === 'sms') return 'M 100 180 L 220 180 Q 250 180 250 174 L 250 174 Q 250 168 280 168 L 580 168';
+    if (routingState.type === 'audio') return 'M 100 180 L 220 180 Q 250 180 250 190 L 250 208 Q 250 228 280 228 L 580 228';
+    if (routingState.type === 'image') return 'M 100 180 L 220 180 Q 250 180 250 220 L 250 268 Q 250 288 280 288 L 580 288';
     return '';
   };
 
@@ -1178,15 +1892,33 @@ export default function App() {
   const handleMasterAgentSubmit = () => {
     if (!masterInputText.trim() && !masterAttachedFile) return;
 
+    const text = masterInputText.trim();
+    const file = masterAttachedFile;
+
+    // Clear inputs immediately to keep input form snappy
+    setMasterInputText('');
+    setMasterAttachedFile(null);
+
+    // Save user query to history feed
+    const userMsgId = 'msg_' + Date.now() + '_user';
+    const userMsg = {
+      id: userMsgId,
+      role: 'user',
+      content: text,
+      file: file ? { name: file.name, size: file.size } : null,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    setCopilotMessages(prev => [...prev, userMsg]);
+
     let detectedType = null;
     let targetPage = null;
 
-    if (masterAttachedFile) {
-      const ext = masterAttachedFile.name.split('.').pop().toLowerCase();
-      if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+    if (file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(ext)) {
         detectedType = 'image';
         targetPage = 'Visual Investigation';
-      } else if (['wav', 'mp3', 'm4a'].includes(ext)) {
+      } else if (['wav', 'mp3', 'ogg', 'm4a', 'aac'].includes(ext)) {
         detectedType = 'audio';
         targetPage = 'Call Analysis';
       } else {
@@ -1194,13 +1926,59 @@ export default function App() {
         return;
       }
     } else {
-      const text = masterInputText.trim();
-      const domainRegex = /^(https?:\/\/)?(www\.)?[a-zA-Z0-9-]+(\.[a-zA-Z]{2,})+(\/\S*)?$/;
-      const isUrl = text.startsWith('http://') || text.startsWith('https://') || text.startsWith('www.') || domainRegex.test(text);
-      if (isUrl) {
+      const lower = text.toLowerCase();
+      
+      // 1. Natural Language overrides
+      const isVisualNL = lower.includes('screenshot') || lower.includes('visual') || lower.includes('image');
+      const isAudioNL = lower.includes('call recording') || lower.includes('call transcript') || lower.includes('audio file');
+
+      // 2. URL check (starts with http/https/www or domain ending without spaces)
+      const isPlainUrl = (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('www.')) && !lower.includes(' ');
+      const isDomainOnly = !lower.includes(' ') && (
+        lower.endsWith('.com') || lower.includes('.com/') ||
+        lower.endsWith('.org') || lower.includes('.org/') ||
+        lower.endsWith('.net') || lower.includes('.net/') ||
+        lower.endsWith('.in') || lower.includes('.in/') ||
+        lower.endsWith('.io') || lower.includes('.io/') ||
+        lower.endsWith('.ai') || lower.includes('.ai/') ||
+        lower.endsWith('.co') || lower.includes('.co/') ||
+        lower.endsWith('.gov') || lower.includes('.gov/') ||
+        lower.endsWith('.edu') || lower.includes('.edu/')
+      );
+      const isUrl = isPlainUrl || isDomainOnly;
+
+      // 3. Email keywords (Strict check)
+      const emailKeywords = [
+        'email', 'emails', 'e-mail', 'gmail', 'inbox', 'mailbox', 'mail', 'mails',
+        'received mail', 'latest mail', 'today\'s mail', 'unread mail', 'compose mail',
+        'received email', 'latest email', 'unread email', 'mail id'
+      ];
+      const hasEmailKeyword = emailKeywords.some(kw => lower.includes(kw));
+
+      // 4. SMS keywords
+      const smsKeywords = [
+        'sms', 'text', 'texts', 'text message', 'text messages', 'otp', 'otp message',
+        'bank sms', 'received sms', 'mobile message', 'telecom', 'smishing'
+      ];
+      const hasSmsKeyword = smsKeywords.some(kw => lower.includes(kw));
+
+      if (isVisualNL) {
+        detectedType = 'image';
+        targetPage = 'Visual Investigation';
+      } else if (isAudioNL) {
+        detectedType = 'audio';
+        targetPage = 'Call Analysis';
+      } else if (hasEmailKeyword) {
+        detectedType = 'email';
+        targetPage = 'Email Investigation';
+      } else if (isUrl) {
         detectedType = 'url';
         targetPage = 'Web & QR Scan';
+      } else if (hasSmsKeyword) {
+        detectedType = 'sms';
+        targetPage = 'SMS Investigation';
       } else {
+        // Fallback default: route plain phishing sentence pastes / text to SMS Investigation
         detectedType = 'sms';
         targetPage = 'SMS Investigation';
       }
@@ -1208,17 +1986,14 @@ export default function App() {
 
     setRoutingState({
       active: true,
-      input: masterInputText,
-      file: masterAttachedFile,
+      input: text,
+      file: file,
       type: detectedType,
       target: targetPage
     });
 
-    const storedInput = masterInputText;
-    const storedFile = masterAttachedFile;
-
-    setMasterInputText('');
-    setMasterAttachedFile(null);
+    const storedInput = text;
+    const storedFile = file;
 
     // Dynamic cinematic pipeline step triggers
     setActiveJunctionIndex(0);
@@ -1229,34 +2004,46 @@ export default function App() {
 
     setTimeout(() => {
       setActiveJunctionIndex(-1);
-      // Begin cinematic page fade/zoom transition
-      setActiveTransition(true);
       
-      setTimeout(() => {
-        setActiveNav(targetPage);
-        setActiveTransition(false);
-        
-        let targetField = null;
-        if (detectedType === 'url') targetField = 'webUrlText';
-        else if (detectedType === 'sms') targetField = 'smsMessage';
-        else if (detectedType === 'image') targetField = 'visualFile';
-        else if (detectedType === 'audio') targetField = 'callSelectedFile';
-
-        setTypingState({
-          active: true,
-          text: storedInput,
-          targetField: targetField,
-          file: storedFile
+      if (detectedType === 'email') {
+        setRoutingState({
+          active: false,
+          input: '',
+          file: null,
+          type: null,
+          target: null
         });
-      }, 400);
+        triggerCopilotEmailSearch(storedInput, storedFile, true);
+      } else {
+        // Begin cinematic page fade/zoom transition
+        setActiveTransition(true);
+        
+        setTimeout(() => {
+          setActiveNav(targetPage);
+          setActiveTransition(false);
+          
+          let targetField = null;
+          if (detectedType === 'url') targetField = 'webUrlText';
+          else if (detectedType === 'sms') targetField = 'smsMessage';
+          else if (detectedType === 'image') targetField = 'visualFile';
+          else if (detectedType === 'audio') targetField = 'callSelectedFile';
 
-      setRoutingState({
-        active: false,
-        input: '',
-        file: null,
-        type: null,
-        target: null
-      });
+          setTypingState({
+            active: true,
+            text: storedInput,
+            targetField: targetField,
+            file: storedFile
+          });
+        }, 400);
+
+        setRoutingState({
+          active: false,
+          input: '',
+          file: null,
+          type: null,
+          target: null
+        });
+      }
     }, 2800);
   };
 
@@ -2636,8 +3423,260 @@ export default function App() {
     );
   };
 
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#020305', color: '#00E676', fontFamily: 'monospace' }}>
+        <RefreshCw style={{ width: '48px', height: '48px', color: '#00E676', marginBottom: '16px' }} className="animate-spin" />
+        <div style={{ letterSpacing: '2px', fontWeight: 'bold' }}>ESTABLISHING SECURE GATEWAY...</div>
+      </div>
+    );
+  }
+
   if (view === 'landing') {
-    return <LandingPage onStartAnalysis={() => setView('dashboard')} />;
+    return (
+      <LandingPage 
+        onStartAnalysis={() => {
+          if (user) {
+            setView('boot');
+          } else {
+            setView('auth');
+          }
+        }} 
+      />
+    );
+  }
+
+  if (view === 'auth' && !user) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        height: '100vh', 
+        background: '#020305', 
+        color: '#fff', 
+        fontFamily: 'monospace',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Cyber Grid background effect */}
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundImage: 'linear-gradient(rgba(0, 230, 118, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 230, 118, 0.03) 1px, transparent 1px)',
+          backgroundSize: '30px 30px',
+          zIndex: 1
+        }} />
+        
+        {/* Obsid Glass card */}
+        <div style={{
+          position: 'relative',
+          zIndex: 2,
+          width: '100%',
+          maxWidth: '420px',
+          padding: '40px 32px',
+          background: 'rgba(3, 8, 17, 0.65)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(0, 230, 118, 0.25)',
+          boxShadow: '0 0 35px rgba(0, 230, 118, 0.15)',
+          textAlign: 'center'
+        }}>
+          {/* Glowing Header */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+            <Shield style={{ width: '40px', height: '40px', color: '#00E676' }} className="animate-pulse" />
+          </div>
+          <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#fff', letterSpacing: '3px', margin: '0 0 4px 0' }}>
+            SCAM<span style={{ color: '#00E676' }}>ON</span> AI
+          </h1>
+          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '32px' }}>
+            SOC Access Authorization Gate
+          </div>
+
+          <form onSubmit={authMode === 'login' ? handleEmailLogin : handleEmailSignup} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <div style={{ textAlign: 'left' }}>
+              <label style={{ fontSize: '10px', color: '#00E676', textTransform: 'uppercase', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Terminal ID (Email)</label>
+              <input 
+                type="email" 
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                placeholder="terminal@scamon.ai"
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  background: '#05070a',
+                  border: '1px solid rgba(0, 230, 118, 0.2)',
+                  borderRadius: '2px',
+                  color: '#fff',
+                  fontFamily: 'monospace',
+                  fontSize: '13.5px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <div style={{ textAlign: 'left' }}>
+              <label style={{ fontSize: '10px', color: '#00E676', textTransform: 'uppercase', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Security Pass (Password)</label>
+              <input 
+                type="password" 
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  background: '#05070a',
+                  border: '1px solid rgba(0, 230, 118, 0.2)',
+                  borderRadius: '2px',
+                  color: '#fff',
+                  fontFamily: 'monospace',
+                  fontSize: '13.5px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            {authError && (
+              <div style={{ 
+                fontSize: '11px', 
+                color: '#FF3D00', 
+                background: 'rgba(255,61,0,0.08)', 
+                border: '1px solid rgba(255,61,0,0.3)', 
+                padding: '10px 14px', 
+                textAlign: 'left', 
+                fontFamily: 'monospace', 
+                lineHeight: '1.4',
+                boxShadow: '0 0 10px rgba(255, 61, 0, 0.08)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px'
+              }}>
+                <span style={{ fontWeight: 'bold' }}>[AUTH_ERR]</span> 
+                <span>{getCleanAuthError(authError)}</span>
+              </div>
+            )}
+
+            <button 
+              type="submit"
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: '#00E676',
+                border: 'none',
+                color: '#020305',
+                fontWeight: 'bold',
+                fontSize: '13.5px',
+                fontFamily: 'monospace',
+                cursor: 'pointer',
+                borderRadius: '2px',
+                textTransform: 'uppercase',
+                marginTop: '6px'
+              }}
+            >
+              {authMode === 'login' ? 'AUTHORIZE TERMINAL ❯' : 'REGISTER TERMINAL ❯'}
+            </button>
+          </form>
+
+          {/* Divider */}
+          <div style={{ display: 'flex', alignItems: 'center', margin: '24px 0', gap: '10px' }}>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+            <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Federated Auth</span>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+          </div>
+
+          {/* Google Login */}
+          <button 
+            onClick={handleGoogleLogin}
+            style={{
+              width: '100%',
+              padding: '10px',
+              background: 'transparent',
+              border: '1px solid rgba(0, 230, 118, 0.4)',
+              color: '#00E676',
+              fontWeight: 'bold',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+              borderRadius: '2px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            <svg style={{ width: '14px', height: '14px' }} viewBox="0 0 24 24">
+              <path fill="currentColor" d="M21.35,11.1H12v2.7h5.38c-0.24,1.28-0.96,2.37-2.04,3.1v2.6h3.28c1.92-1.78,3.02-4.4,3.02-7.4 C21.64,11.77,21.54,11.41,21.35,11.1z M12,22c2.7,0,4.96-0.9,6.62-2.4l-3.28-2.6c-0.9,0.6-2.07,0.98-3.34,0.98 c-2.58,0-4.78-1.75-5.56-4.1H3.1v2.7C4.76,19.9,8.12,22,12,22z M6.44,13.88c-0.2-0.6-0.31-1.24-0.31-1.88s0.11-1.28,0.31-1.88V7.4H3.1 C2.4,8.8,2,10.36,2,12s0.4,3.2,1.1,4.6L6.44,13.88z M12,6.02c1.47,0,2.79,0.5,3.83,1.5l2.87-2.87C17,3.33,14.7,2,12,2 C8.12,2,4.76,4.1,3.1,7.4l3.34,2.7C7.22,7.77,9.42,6.02,12,6.02z" />
+            </svg>
+            SIGN IN WITH GOOGLE
+          </button>
+
+          {/* Mode toggle */}
+          <div style={{ marginTop: '28px', fontSize: '11px' }}>
+            {authMode === 'login' ? (
+              <span style={{ color: 'rgba(255,255,255,0.4)' }}>
+                Don't have terminal credentials?{' '}
+                <span 
+                  onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+                  style={{ color: '#00E676', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline' }}
+                >
+                  Create Account
+                </span>
+              </span>
+            ) : (
+              <span style={{ color: 'rgba(255,255,255,0.4)' }}>
+                Already have terminal credentials?{' '}
+                <span 
+                  onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                  style={{ color: '#00E676', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline' }}
+                >
+                  Sign In
+                </span>
+              </span>
+            )}
+          </div>
+
+          {/* Back to Website option */}
+          <div style={{ marginTop: '22px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px' }}>
+            <span 
+              onClick={() => { setView('landing'); setAuthError(''); }}
+              style={{ 
+                color: '#00E676', 
+                cursor: 'pointer', 
+                fontSize: '11px', 
+                fontWeight: 'bold', 
+                textTransform: 'uppercase', 
+                letterSpacing: '1.2px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'text-shadow 0.2s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.textShadow = '0 0 8px #00E676'}
+              onMouseLeave={e => e.currentTarget.style.textShadow = 'none'}
+            >
+              ❮ Back to Website
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'auth' && user) {
+    setTimeout(() => setView('boot'), 0);
+    return null;
+  }
+
+  if (view === 'boot') {
+    return <BootScreen onComplete={() => setView('dashboard')} />;
+  }
+
+  if (view === 'dashboard' && !user) {
+    setTimeout(() => setView('auth'), 0);
+    return null;
   }
 
   return (
@@ -2878,8 +3917,12 @@ export default function App() {
                 SOC
               </div>
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', fontFamily: 'monospace' }}>ANALYST_732</div>
-                <div style={{ fontSize: '8px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Access: Level 4</div>
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', fontFamily: 'monospace', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user && user.email ? user.email.split('@')[0].toUpperCase() : 'ANALYST_732'}
+                </div>
+                <div style={{ fontSize: '8px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user && user.email ? user.email : 'Access: Level 4'}
+                </div>
               </div>
             </div>
           )}
@@ -2912,7 +3955,7 @@ export default function App() {
             {/* Red Glowing Logout session button */}
             {!sidebarCollapsed && (
               <button 
-                onClick={() => setView('landing')}
+                onClick={handleLogout}
                 style={{
                   padding: '8px 12px',
                   background: 'rgba(255, 61, 0, 0.05)',
@@ -3065,6 +4108,21 @@ export default function App() {
                           <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase' }}>Intercepted Message Body</span>
                           <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '16px', color: '#fff', fontSize: '14px', lineHeight: '1.5', fontFamily: 'monospace' }}>
                             {smsResult.sms?.message}
+                            {(smsResult.sms?.message && (smsResult.sms.message.includes('http://') || smsResult.sms.message.includes('https://') || smsResult.sms.message.includes('www.') || smsResult.sms.message.includes('.com'))) && (
+                              <div style={{ marginTop: '10px' }}>
+                                <button 
+                                  onClick={() => {
+                                    const urlMatch = smsResult.sms.message.match(/(https?:\/\/[^\s]+)/) || [null, 'https://company.com'];
+                                    triggerCrossAgentRouting(urlMatch[0] || 'https://company.com', null, 'url', 'Web & QR Scan');
+                                  }}
+                                  style={smartButtonStyle}
+                                  onMouseEnter={smartButtonHoverEnter}
+                                  onMouseLeave={smartButtonHoverLeave}
+                                >
+                                  [WEB] Analyze Website
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -3139,6 +4197,21 @@ export default function App() {
                             <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase' }}>Message Body</span>
                             <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '12px 16px', color: '#fff', fontSize: '13px', lineHeight: '1.5', margin: '4px 0' }}>
                               {smsResult.sms?.message}
+                              {(smsResult.sms?.message && (smsResult.sms.message.includes('http://') || smsResult.sms.message.includes('https://') || smsResult.sms.message.includes('www.') || smsResult.sms.message.includes('.com'))) && (
+                                <div style={{ marginTop: '10px' }}>
+                                  <button 
+                                    onClick={() => {
+                                      const urlMatch = smsResult.sms.message.match(/(https?:\/\/[^\s]+)/) || [null, 'https://company.com'];
+                                      triggerCrossAgentRouting(urlMatch[0] || 'https://company.com', null, 'url', 'Web & QR Scan');
+                                    }}
+                                    style={smartButtonStyle}
+                                    onMouseEnter={smartButtonHoverEnter}
+                                    onMouseLeave={smartButtonHoverLeave}
+                                  >
+                                    [WEB] Analyze Website
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -3867,6 +4940,29 @@ export default function App() {
                         fontFamily: 'monospace'
                       }}>
                         {callResult.transcript}
+                        {(callResult.transcript && (
+                          callResult.transcript.toLowerCase().includes('website') || 
+                          callResult.transcript.toLowerCase().includes('link') || 
+                          callResult.transcript.toLowerCase().includes('url') || 
+                          callResult.transcript.toLowerCase().includes('payment page') || 
+                          callResult.transcript.toLowerCase().includes('google form') ||
+                          callResult.transcript.toLowerCase().includes('http') ||
+                          callResult.transcript.toLowerCase().includes('www.')
+                        )) && (
+                          <div style={{ marginTop: '12px' }}>
+                            <button 
+                              onClick={() => {
+                                const urlMatch = callResult.transcript.match(/(https?:\/\/[^\s]+)/) || [null, 'https://suspicious-payment-portal.com'];
+                                triggerCrossAgentRouting(urlMatch[0] || 'https://suspicious-payment-portal.com', null, 'url', 'Web & QR Scan');
+                              }}
+                              style={smartButtonStyle}
+                              onMouseEnter={smartButtonHoverEnter}
+                              onMouseLeave={smartButtonHoverLeave}
+                            >
+                              [WEB] Analyze Website
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -4240,6 +5336,84 @@ export default function App() {
                             }}>
                               {visualResult.extracted_text || 'No text extracted.'}
                             </div>
+
+                            {/* Cross-Agent Smart Action Buttons for OCR */}
+                            {visualResult.extracted_text && (
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                                {(() => {
+                                  const text = visualResult.extracted_text;
+                                  
+                                  const urlRegex = /(https?:\/\/[^\s]+|www\.[a-zA-Z0-9-]+\.[a-zA-Z]{2,6}|[a-zA-Z0-9-]+\.(?:com|org|net|gov|edu|io|in|info)\b)/gi;
+                                  const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi;
+                                  const phoneRegex = /(\+?\d{1,3}[-.\s]??\d{3}[-.\s]??\d{3}[-.\s]??\d{4}|\b\d{10}\b)/g;
+
+                                  const detectedUrls = Array.from(new Set(text.match(urlRegex) || []));
+                                  const detectedEmails = Array.from(new Set(text.match(emailRegex) || []));
+                                  const detectedPhones = Array.from(new Set(text.match(phoneRegex) || []));
+                                  const isQrType = visualResult.image_type?.toLowerCase().includes('qr') || 
+                                                    visualResult.scam_category?.toLowerCase().includes('qr') || 
+                                                    text.toLowerCase().includes('qr code') || 
+                                                    text.toLowerCase().includes('qr destination');
+
+                                  return (
+                                    <>
+                                      {detectedUrls.map((url, uIdx) => (
+                                        <button 
+                                          key={`url-${uIdx}`}
+                                          onClick={() => {
+                                            const cleanUrl = url.startsWith('http') ? url : `https://${url}`;
+                                            triggerCrossAgentRouting(cleanUrl, null, 'url', 'Web & QR Scan');
+                                          }}
+                                          style={smartButtonStyle}
+                                          onMouseEnter={smartButtonHoverEnter}
+                                          onMouseLeave={smartButtonHoverLeave}
+                                        >
+                                          [WEB] Analyze Website ({url.length > 15 ? url.substring(0, 12) + '...' : url})
+                                        </button>
+                                      ))}
+
+                                      {detectedEmails.map((emailAddr, eIdx) => (
+                                        <button 
+                                          key={`email-${eIdx}`}
+                                          onClick={() => triggerCrossAgentRouting(`Show emails from ${emailAddr}`, null, 'email', 'Email Investigation')}
+                                          style={smartButtonStyle}
+                                          onMouseEnter={smartButtonHoverEnter}
+                                          onMouseLeave={smartButtonHoverLeave}
+                                        >
+                                          📧 Analyze Email ({emailAddr})
+                                        </button>
+                                      ))}
+
+                                      {detectedPhones.map((phoneNum, pIdx) => (
+                                        <button 
+                                          key={`phone-${pIdx}`}
+                                          onClick={() => triggerCrossAgentRouting(`Inspect phone SMS history for ${phoneNum}`, null, 'sms', 'SMS Investigation')}
+                                          style={smartButtonStyle}
+                                          onMouseEnter={smartButtonHoverEnter}
+                                          onMouseLeave={smartButtonHoverLeave}
+                                        >
+                                          📞 Analyze Phone ({phoneNum})
+                                        </button>
+                                      ))}
+
+                                      {isQrType && (
+                                        <button 
+                                          onClick={() => {
+                                            const firstUrl = detectedUrls[0] || 'https://qr-scam-payload.com/auth';
+                                            triggerCrossAgentRouting(firstUrl, null, 'url', 'Web & QR Scan');
+                                          }}
+                                          style={smartButtonStyle}
+                                          onMouseEnter={smartButtonHoverEnter}
+                                          onMouseLeave={smartButtonHoverLeave}
+                                        >
+                                          📷 Analyze QR Destination
+                                        </button>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
                           </div>
 
                           {/* Extracted Entities */}
@@ -4338,7 +5512,7 @@ export default function App() {
                                 <div style={{ padding: '16px', backgroundColor: '#030811', border: '1px solid rgba(0,230,118,0.2)', borderRadius: '6px' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                                     <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--accent-green)', fontFamily: 'var(--font-cyber)' }}>
-                                      🌐 WEBSITE_INVESTIGATION_AGENT
+                                      [WEB] WEBSITE_INVESTIGATION_AGENT
                                     </span>
                                     <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                                       Risk Score: {visualResult.agent_results.website.risk_score}%
@@ -4357,7 +5531,7 @@ export default function App() {
                                 <div style={{ padding: '16px', backgroundColor: '#030811', border: '1px solid rgba(0,184,212,0.2)', borderRadius: '6px' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                                     <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#00b8d4', fontFamily: 'var(--font-cyber)' }}>
-                                      💬 SMS_INVESTIGATION_AGENT
+                                      [SMS] SMS_INVESTIGATION_AGENT
                                     </span>
                                     <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                                       Risk Score: {visualResult.agent_results.sms.analysis?.risk_score || 0}%
@@ -4376,7 +5550,7 @@ export default function App() {
                                 <div style={{ padding: '16px', backgroundColor: '#030811', border: '1px solid rgba(255,145,0,0.2)', borderRadius: '6px' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                                     <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#FF9100', fontFamily: 'var(--font-cyber)' }}>
-                                      ✉ EMAIL_INVESTIGATION_AGENT
+                                      [EMAIL] EMAIL_INVESTIGATION_AGENT
                                     </span>
                                     <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                                       Risk Score: {visualResult.agent_results.email.risk_score || 85}%
@@ -4409,7 +5583,7 @@ export default function App() {
                         }}
                         style={{ flex: 1, backgroundColor: '#E91E63', border: '1px solid #E91E63', boxShadow: '0 0 12px rgba(233,30,99,0.4)', color: '#fff', fontSize: '12px', height: '44px', fontWeight: 'bold' }}
                       >
-                        📄 GENERATE LEGAL COMPLAINT
+                        GENERATE LEGAL COMPLAINT
                       </button>
                       <button 
                         className="btn-primary" 
@@ -6143,7 +7317,7 @@ export default function App() {
                       }}>
                         {emailChatMessages.length === 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '10px', textAlign: 'center', padding: '10px' }}>
-                            <span style={{ fontSize: '28px', marginBottom: '10px' }}>💬</span>
+                            <MessageSquare style={{ width: '28px', height: '28px', marginBottom: '10px', color: 'var(--accent-green)' }} />
                             <span style={{ lineHeight: '1.5' }}>
                               Ask me any question regarding this email's headers, links, domains, attachments, or composite risk findings.
                             </span>
@@ -7940,12 +9114,12 @@ export default function App() {
                       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '10px' }}>
                         <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>Agents Participated:</span>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.website ? 'rgba(0,230,118,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.website ? '#00E676' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.website ? '#fff' : 'var(--text-muted)' }}>🌐 Website Investigation Agent</span>
-                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.email ? 'rgba(0,176,255,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.email ? '#00B0FF' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.email ? '#fff' : 'var(--text-muted)' }}>📧 Email Investigation Agent</span>
-                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.call ? 'rgba(255,145,0,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.call ? '#FF9100' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.call ? '#fff' : 'var(--text-muted)' }}>📞 Call Analysis Agent</span>
-                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.live_call ? 'rgba(213,0,249,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.live_call ? '#D500F9' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.live_call ? '#fff' : 'var(--text-muted)' }}>🎙 Live Call Detector</span>
-                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.sms ? 'rgba(0,229,255,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.sms ? '#00E5FF' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.sms ? '#fff' : 'var(--text-muted)' }}>💬 SMS Investigation Agent</span>
-                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.threat_correlation ? 'rgba(255,61,0,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.threat_correlation ? '#FF3D00' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.threat_correlation ? '#fff' : 'var(--text-muted)' }}>🛡 Threat Correlation Agent</span>
+                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.website ? 'rgba(0,230,118,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.website ? '#00E676' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.website ? '#fff' : 'var(--text-muted)' }}>[WEB] Website Investigation Agent</span>
+                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.email ? 'rgba(0,176,255,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.email ? '#00B0FF' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.email ? '#fff' : 'var(--text-muted)' }}>[EMAIL] Email Investigation Agent</span>
+                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.call ? 'rgba(255,145,0,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.call ? '#FF9100' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.call ? '#fff' : 'var(--text-muted)' }}>[CALL] Call Analysis Agent</span>
+                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.live_call ? 'rgba(213,0,249,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.live_call ? '#D500F9' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.live_call ? '#fff' : 'var(--text-muted)' }}>[VOICE] Live Call Detector</span>
+                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.sms ? 'rgba(0,229,255,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.sms ? '#00E5FF' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.sms ? '#fff' : 'var(--text-muted)' }}>[SMS] SMS Investigation Agent</span>
+                          <span style={{ fontSize: '8.5px', padding: '2px 8px', background: selectedCase.evidence?.threat_correlation ? 'rgba(255,61,0,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedCase.evidence?.threat_correlation ? '#FF3D00' : 'rgba(255,255,255,0.08)'}`, color: selectedCase.evidence?.threat_correlation ? '#fff' : 'var(--text-muted)' }}>[CORR] Threat Correlation Agent</span>
                         </div>
                       </div>
 
@@ -7955,7 +9129,7 @@ export default function App() {
                         {/* Left column: Agent cards */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                           <span style={{ fontSize: '10px', color: 'var(--accent-green)', fontFamily: 'monospace', textTransform: 'uppercase', fontWeight: 'bold' }}>
-                            📁 Forensic Evidence Records
+                            Forensic Evidence Records
                           </span>
 
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -7963,7 +9137,7 @@ export default function App() {
                             {/* Card 1: Website Investigation Agent */}
                             <div className="evidence-card" style={{ border: `1px solid ${selectedCase.evidence?.website ? '#00E676' : 'rgba(255,255,255,0.05)'}`, opacity: selectedCase.evidence?.website ? 1 : 0.4 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.website ? '#00E676' : '#fff' }}>🌐 Website Investigation Agent</span>
+                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.website ? '#00E676' : '#fff' }}>[WEB] Website Investigation Agent</span>
                                 <span style={{ fontSize: '8px', background: selectedCase.evidence?.website ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.05)', color: selectedCase.evidence?.website ? '#00E676' : 'var(--text-muted)', border: '1px solid', padding: '1px 6px', fontWeight: 'bold' }}>
                                   {selectedCase.evidence?.website ? 'VERIFIED' : 'PENDING'}
                                 </span>
@@ -8006,7 +9180,7 @@ export default function App() {
                             {/* Card 2: Email Investigation Agent */}
                             <div className="evidence-card" style={{ border: `1px solid ${selectedCase.evidence?.email ? '#00B0FF' : 'rgba(255,255,255,0.05)'}`, opacity: selectedCase.evidence?.email ? 1 : 0.4 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.email ? '#00B0FF' : '#fff' }}>📧 Email Investigation Agent</span>
+                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.email ? '#00B0FF' : '#fff' }}>[EMAIL] Email Investigation Agent</span>
                                 <span style={{ fontSize: '8px', background: selectedCase.evidence?.email ? 'rgba(0,176,255,0.15)' : 'rgba(255,255,255,0.05)', color: selectedCase.evidence?.email ? '#00B0FF' : 'var(--text-muted)', border: '1px solid', padding: '1px 6px', fontWeight: 'bold' }}>
                                   {selectedCase.evidence?.email ? 'VERIFIED' : 'PENDING'}
                                 </span>
@@ -8050,7 +9224,7 @@ export default function App() {
                             {/* Card 3: Call Analysis Agent */}
                             <div className="evidence-card" style={{ border: `1px solid ${selectedCase.evidence?.call ? '#FF9100' : 'rgba(255,255,255,0.05)'}`, opacity: selectedCase.evidence?.call ? 1 : 0.4 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.call ? '#FF9100' : '#fff' }}>📞 Call Analysis Agent</span>
+                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.call ? '#FF9100' : '#fff' }}>[CALL] Call Analysis Agent</span>
                                 <span style={{ fontSize: '8px', background: selectedCase.evidence?.call ? 'rgba(255,145,0,0.15)' : 'rgba(255,255,255,0.05)', color: selectedCase.evidence?.call ? '#FF9100' : 'var(--text-muted)', border: '1px solid', padding: '1px 6px', fontWeight: 'bold' }}>
                                   {selectedCase.evidence?.call ? 'VERIFIED' : 'PENDING'}
                                 </span>
@@ -8091,7 +9265,7 @@ export default function App() {
                             {/* Card 4: Live Call Detector */}
                             <div className="evidence-card" style={{ border: `1px solid ${selectedCase.evidence?.live_call ? '#D500F9' : 'rgba(255,255,255,0.05)'}`, opacity: selectedCase.evidence?.live_call ? 1 : 0.4 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.live_call ? '#D500F9' : '#fff' }}>🎙 Live Call Detector</span>
+                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.live_call ? '#D500F9' : '#fff' }}>[VOICE] Live Call Detector</span>
                                 <span style={{ fontSize: '8px', background: selectedCase.evidence?.live_call ? 'rgba(213,0,249,0.15)' : 'rgba(255,255,255,0.05)', color: selectedCase.evidence?.live_call ? '#D500F9' : 'var(--text-muted)', border: '1px solid', padding: '1px 6px', fontWeight: 'bold' }}>
                                   {selectedCase.evidence?.live_call ? 'VERIFIED' : 'PENDING'}
                                 </span>
@@ -8130,7 +9304,7 @@ export default function App() {
                             {/* Card 4.5: SMS Investigation Agent */}
                             <div className="evidence-card" style={{ border: `1px solid ${selectedCase.evidence?.sms ? '#00E5FF' : 'rgba(255,255,255,0.05)'}`, opacity: selectedCase.evidence?.sms ? 1 : 0.4 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.sms ? '#00E5FF' : '#fff' }}>💬 SMS Investigation Agent</span>
+                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: selectedCase.evidence?.sms ? '#00E5FF' : '#fff' }}>[SMS] SMS Investigation Agent</span>
                                 <span style={{ fontSize: '8px', background: selectedCase.evidence?.sms ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.05)', color: selectedCase.evidence?.sms ? '#00E5FF' : 'var(--text-muted)', border: '1px solid', padding: '1px 6px', fontWeight: 'bold' }}>
                                   {selectedCase.evidence?.sms ? 'VERIFIED' : 'PENDING'}
                                 </span>
@@ -10366,600 +11540,833 @@ export default function App() {
                 </div>
               </div>
 
-              <div 
-                style={{ 
-                  flex: 1, 
+              {/* Flex Row Container for ChatGPT-style Mini Sidebar and Chat Feed Workspace */}
+              <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+                
+                {/* CHATGPT STYLE MINI-SIDEBAR */}
+                <div style={{
+                  width: '240px',
+                  background: 'rgba(2, 3, 5, 0.95)',
+                  borderRight: '1px solid rgba(0, 230, 118, 0.15)',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '24px', 
-                  overflowY: 'auto',
-                  position: 'relative'
-                }}
-                className="soc-sidebar-scroll"
-                onDragEnter={handleDragEnter}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                {routingState.active ? (
-                  /* ROUTING PIPELINE ANIMATION VIEW */
-                  <div style={{ textAlign: 'center', width: '100%', maxWidth: '640px', animation: 'fadeIn 0.3s ease-out' }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 230, 118, 0.08)', border: '1px solid rgba(0, 230, 118, 0.2)', padding: '6px 14px', borderRadius: '2px', marginBottom: '12px' }}>
-                      <span className="animate-pulse" style={{ width: '6px', height: '6px', background: '#00E676', borderRadius: '50%' }} />
-                      <span style={{ fontSize: '11px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace', textTransform: 'uppercase' }}>
-                        ✓ {routingState.type === 'url' ? 'Website URL' : routingState.type === 'image' ? 'Image' : routingState.type === 'audio' ? 'Audio File' : 'SMS Message'} Detected
-                      </span>
-                    </div>
-
-                    <h3 style={{ fontSize: '12px', color: '#fff', margin: '0 0 20px 0', fontFamily: 'monospace', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
-                      {getStatusText()}
-                    </h3>
-
-                    {/* SVG Branch Pipeline */}
-                    <svg width="600" height="240" viewBox="0 0 600 240" style={{ background: 'rgba(2, 3, 5, 0.85)', border: '1px solid rgba(0,230,118,0.15)', borderRadius: '4px', margin: 'auto', display: 'block', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
-                      <defs>
-                        <filter id="svg-glow" x="-30%" y="-30%" width="160%" height="160%">
-                          <feGaussianBlur stdDeviation="4" result="blur" />
-                          <feMerge>
-                            <feMergeNode in="blur" />
-                            <feMergeNode in="SourceGraphic" />
-                          </feMerge>
-                        </filter>
-                      </defs>
-                      
-                      {/* Decorative Motherboard Background Traces */}
-                      <path d="M 50 40 L 120 40 L 120 100" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1.5" />
-                      <path d="M 140 180 L 220 180 L 220 220" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1.5" />
-                      <path d="M 280 20 L 320 20 L 320 60" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1.5" />
-                      <path d="M 350 160 L 390 160 L 390 120" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1.5" />
-                      
-                      {/* Connection base path */}
-                      <path d="M 80 120 L 160 120" fill="none" stroke={activeJunctionIndex >= 0 ? "rgba(0, 230, 118, 0.4)" : "rgba(255, 255, 255, 0.05)"} strokeWidth="2" style={{ transition: 'stroke 0.3s' }} />
-                      
-                      {/* Branch paths with rounded corners */}
-                      <path d="M 160 120 Q 180 120 180 100 L 180 60 Q 180 40 200 40 L 400 40" fill="none" stroke={routingState.type === 'url' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.05)"} strokeWidth={routingState.type === 'url' ? '2.5' : '1.5'} style={{ transition: 'stroke 0.3s' }} />
-                      <path d="M 160 120 Q 180 120 180 110 L 180 100 Q 180 90 200 90 L 400 90" fill="none" stroke={routingState.type === 'sms' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.05)"} strokeWidth={routingState.type === 'sms' ? '2.5' : '1.5'} style={{ transition: 'stroke 0.3s' }} />
-                      <path d="M 160 120 Q 180 120 180 130 L 180 140 Q 180 150 200 150 L 400 150" fill="none" stroke={routingState.type === 'audio' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.05)"} strokeWidth={routingState.type === 'audio' ? '2.5' : '1.5'} style={{ transition: 'stroke 0.3s' }} />
-                      <path d="M 160 120 Q 180 120 180 140 L 180 180 Q 180 200 200 200 L 400 200" fill="none" stroke={routingState.type === 'image' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.05)"} strokeWidth={routingState.type === 'image' ? '2.5' : '1.5'} style={{ transition: 'stroke 0.3s' }} />
-                      
-                      {/* Glowing active path trace (Tron Light Trail) */}
-                      {routingState.type && (
-                        <path d={getActivePathD()} fill="none" stroke="#00E676" strokeWidth="2.5" filter="url(#svg-glow)" strokeDasharray="30, 150" strokeDashoffset="0">
-                          <animate attributeName="strokeDashoffset" values="180;0" dur="1.2s" repeatCount="indefinite" />
-                        </path>
-                      )}
-
-                      {/* Radar Circular Pulse (Step 2) */}
-                      <circle cx="80" cy="120" r="16" fill="rgba(0, 230, 118, 0.08)">
-                        <animate attributeName="r" values="16;38" dur="1.4s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" values="1;0" dur="1.4s" repeatCount="indefinite" />
-                      </circle>
-                      <circle cx="80" cy="120" r="16" fill="rgba(0, 230, 118, 0.04)">
-                        <animate attributeName="r" values="16;55" dur="2s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" values="0.8;0" dur="2s" repeatCount="indefinite" />
-                      </circle>
-
-                      {/* Outer pulsing ring for Master node */}
-                      <circle cx="80" cy="120" r="18" fill="none" stroke="#00E676" strokeWidth="1.5" opacity="0.6">
-                        <animate attributeName="stroke-width" values="1.5;3;1.5" dur="1.5s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite" />
-                      </circle>
-
-                      {/* Master agent source node */}
-                      <circle cx="80" cy="120" r="16" fill="#020305" stroke="#00E676" strokeWidth="2" filter="url(#svg-glow)" />
-                      
-                      {/* Shield icon with spinning rotation animation inside node (Step 2) */}
-                      <g transform="translate(80, 120)">
-                        <g>
-                          <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite" />
-                          <path d="M -5 -6 L 5 -6 L 5 -2 C 5 2, 0 6, 0 6 C 0 6, -5 2, -5 -2 Z" fill="none" stroke="#00E676" strokeWidth="1.5" />
-                        </g>
-                      </g>
-                      
-                      <text x="80" y="152" fill="#00E676" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold" letterSpacing="0.5px">MASTER_AGENT</text>
-
-                      {/* Junction Nodes along paths that light up sequentially (Step 5) */}
-                      {/* Junction 1: Split Entrance */}
-                      <circle cx="160" cy="120" r="4.5" fill={activeJunctionIndex >= 1 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 1 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 1 ? "url(#svg-glow)" : "none"} style={{ transition: 'all 0.3s' }} />
-                      <circle cx="160" cy="120" r={activeJunctionIndex >= 1 ? 8 : 0} fill="none" stroke="#00E676" strokeWidth="1" opacity={activeJunctionIndex >= 1 ? 0.8 : 0} style={{ transition: 'all 0.3s' }}>
-                        <animate attributeName="r" values="4.5;12;4.5" dur="1.2s" repeatCount="indefinite" />
-                      </circle>
-
-                      {/* Junction 2: Curve Bend Split (routes to specific y coordinates) */}
-                      {routingState.type === 'url' && (
-                        <g style={{ transition: 'all 0.3s' }}>
-                          <circle cx="180" cy="40" r="4" fill={activeJunctionIndex >= 2 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 2 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 2 ? "url(#svg-glow)" : "none"} />
-                          <circle cx="300" cy="40" r="4" fill={activeJunctionIndex >= 3 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 3 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 3 ? "url(#svg-glow)" : "none"} />
-                        </g>
-                      )}
-                      {routingState.type === 'sms' && (
-                        <g style={{ transition: 'all 0.3s' }}>
-                          <circle cx="180" cy="90" r="4" fill={activeJunctionIndex >= 2 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 2 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 2 ? "url(#svg-glow)" : "none"} />
-                          <circle cx="300" cy="90" r="4" fill={activeJunctionIndex >= 3 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 3 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 3 ? "url(#svg-glow)" : "none"} />
-                        </g>
-                      )}
-                      {routingState.type === 'audio' && (
-                        <g style={{ transition: 'all 0.3s' }}>
-                          <circle cx="180" cy="150" r="4" fill={activeJunctionIndex >= 2 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 2 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 2 ? "url(#svg-glow)" : "none"} />
-                          <circle cx="300" cy="150" r="4" fill={activeJunctionIndex >= 3 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 3 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 3 ? "url(#svg-glow)" : "none"} />
-                        </g>
-                      )}
-                      {routingState.type === 'image' && (
-                        <g style={{ transition: 'all 0.3s' }}>
-                          <circle cx="180" cy="200" r="4" fill={activeJunctionIndex >= 2 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 2 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 2 ? "url(#svg-glow)" : "none"} />
-                          <circle cx="300" cy="200" r="4" fill={activeJunctionIndex >= 3 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 3 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 3 ? "url(#svg-glow)" : "none"} />
-                        </g>
-                      )}
-
-                      {/* Moving Energy Sphere Payload with Motion Blur (Step 4) */}
-                      {routingState.type && (
-                        <circle r="6" fill="#00E676" filter="url(#svg-glow)">
-                          <animateMotion dur="2.4s" repeatCount="1" fill="freeze" path={getActivePathD()} />
-                        </circle>
-                      )}
-
-                      {/* Destinations (tron-themed rect tag headers) (Step 6) */}
-                      <g transform="translate(400, 28)">
-                        <rect width="180" height="24" rx="2" fill="rgba(2,3,5,0.85)" stroke={routingState.type === 'url' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1" filter={routingState.type === 'url' ? "url(#svg-glow)" : "none"} style={{ transition: 'all 0.3s' }} />
-                        <text x="10" y="15" fill={routingState.type === 'url' ? "#00E676" : "var(--text-muted)"} fontSize="10" fontFamily="monospace" fontWeight={routingState.type === 'url' ? "bold" : "normal"}>Web & QR Scan</text>
-                        {routingState.type === 'url' && activeJunctionIndex >= 4 && (
-                          <circle cx="170" cy="12" r="3" fill="#00E676" filter="url(#svg-glow)" />
-                        )}
-                      </g>
-
-                      <g transform="translate(400, 78)">
-                        <rect width="180" height="24" rx="2" fill="rgba(2,3,5,0.85)" stroke={routingState.type === 'sms' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1" filter={routingState.type === 'sms' ? "url(#svg-glow)" : "none"} style={{ transition: 'all 0.3s' }} />
-                        <text x="10" y="15" fill={routingState.type === 'sms' ? "#00E676" : "var(--text-muted)"} fontSize="10" fontFamily="monospace" fontWeight={routingState.type === 'sms' ? "bold" : "normal"}>SMS Investigation</text>
-                        {routingState.type === 'sms' && activeJunctionIndex >= 4 && (
-                          <circle cx="170" cy="12" r="3" fill="#00E676" filter="url(#svg-glow)" />
-                        )}
-                      </g>
-
-                      <g transform="translate(400, 138)">
-                        <rect width="180" height="24" rx="2" fill="rgba(2,3,5,0.85)" stroke={routingState.type === 'audio' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1" filter={routingState.type === 'audio' ? "url(#svg-glow)" : "none"} style={{ transition: 'all 0.3s' }} />
-                        <text x="10" y="15" fill={routingState.type === 'audio' ? "#00E676" : "var(--text-muted)"} fontSize="10" fontFamily="monospace" fontWeight={routingState.type === 'audio' ? "bold" : "normal"}>Call Analysis</text>
-                        {routingState.type === 'audio' && activeJunctionIndex >= 4 && (
-                          <circle cx="170" cy="12" r="3" fill="#00E676" filter="url(#svg-glow)" />
-                        )}
-                      </g>
-
-                      <g transform="translate(400, 188)">
-                        <rect width="180" height="24" rx="2" fill="rgba(2,3,5,0.85)" stroke={routingState.type === 'image' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1" filter={routingState.type === 'image' ? "url(#svg-glow)" : "none"} style={{ transition: 'all 0.3s' }} />
-                        <text x="10" y="15" fill={routingState.type === 'image' ? "#00E676" : "var(--text-muted)"} fontSize="10" fontFamily="monospace" fontWeight={routingState.type === 'image' ? "bold" : "normal"}>Visual Investigation</text>
-                        {routingState.type === 'image' && activeJunctionIndex >= 4 && (
-                          <circle cx="170" cy="12" r="3" fill="#00E676" filter="url(#svg-glow)" />
-                        )}
-                      </g>
-                    </svg>
-                  </div>
-                ) : (
-                  /* DEFAULT LANDING WELCOME WORKSPACE */
-                  <div style={{ maxWidth: '660px', margin: 'auto', display: 'flex', flexDirection: 'column', gap: '32px', textAlign: 'left', padding: '20px', animation: 'fadeIn 0.4s ease-out' }}>
-                    <div>
-                      <h1 style={{ fontSize: '38px', fontWeight: 'bold', color: '#fff', fontFamily: 'monospace', margin: '0 0 10px 0', letterSpacing: '1.5px', minHeight: '46px' }}>
-                        <Typewriter text="Hello." delay={100} onComplete={() => setStartSecondLine(true)} />
-                      </h1>
-                      <div style={{ fontSize: '17px', color: '#00E676', fontFamily: 'monospace', margin: 0, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.8px', minHeight: '24px', display: 'flex', alignItems: 'center' }}>
-                        {startSecondLine && (
-                          <>
-                            <Typewriter text="I'm the ScamON AI Master Agent." delay={55} />
-                            <span className="blinking-cursor" style={{ 
-                              display: 'inline-block',
-                              width: '8px',
-                              height: '16px',
-                              backgroundColor: '#00E676',
-                              marginLeft: '6px',
-                              animation: 'blink 1s step-end infinite'
-                            }}></span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* INFERENCE-PATH STYLE PIPELINE BOX */}
-                    <div style={{
-                      background: 'rgba(2, 3, 5, 0.75)',
-                      border: '1px solid rgba(0, 230, 118, 0.15)',
-                      borderRadius: '4px',
-                      padding: '16px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '12px',
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-                      fontFamily: 'monospace'
-                    }}>
-                      {/* Window Header */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9.5px', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '8px' }}>
-                        <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                          <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FF3D00' }} />
-                          <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FFC400' }} />
-                          <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00E676' }} />
-                          <span style={{ marginLeft: '6px', letterSpacing: '1px', textTransform: 'uppercase' }}>TRIAGE-PIPELINE</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#00E676' }}>
-                          <span>●</span>
-                          <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>REAL-TIME ROUTING</span>
-                        </div>
-                      </div>
-
-                      {/* Pipeline Flow Ingress Container */}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 10px', position: 'relative' }}>
-                        {/* Device / Client Node */}
-                        <div style={{ width: '110px', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(5, 7, 10, 0.85)', padding: '12px 8px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', transition: 'border-color 0.3s' }}>
-                          <Upload style={{ width: '18px', height: '18px', color: '#00E676' }} />
-                          <div>
-                            <div style={{ fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>USER INPUT</div>
-                            <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>Text / Media file</div>
-                          </div>
-                        </div>
-
-                        {/* Connection Line 1 with text label and pulsing flow */}
-                        <div style={{ flex: 1, position: 'relative', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {/* SVG Flow Trace */}
-                          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-                            <line x1="0%" y1="50%" x2="100%" y2="50%" stroke="rgba(0, 230, 118, 0.15)" strokeWidth="1.5" />
-                            <line 
-                              x1="0%" 
-                              y1="50%" 
-                              x2="100%" 
-                              y2="50%" 
-                              stroke="#00E676" 
-                              strokeWidth="2" 
-                              strokeDasharray="6 20"
-                            >
-                              <animate attributeName="stroke-dashoffset" values="26;0" dur="1.2s" repeatCount="indefinite" />
-                            </line>
-                          </svg>
-                          <div style={{ zIndex: 1, background: '#020305', border: '1px solid rgba(0, 230, 118, 0.25)', borderRadius: '2px', padding: '2px 8px', fontSize: '8px', color: '#00E676', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            INGESTING
-                          </div>
-                        </div>
-
-                        {/* Cognitive Core Node */}
-                        <div style={{ width: '120px', border: '1px solid #00E676', background: 'rgba(5, 7, 10, 0.85)', padding: '12px 8px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', boxShadow: '0 0 10px rgba(0, 230, 118, 0.1)' }}>
-                          <Shield style={{ width: '18px', height: '18px', color: '#00E676' }} className="animate-pulse" />
-                          <div>
-                            <div style={{ fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>COGNITIVE CORE</div>
-                            <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>Triage Classifier</div>
-                          </div>
-                        </div>
-
-                        {/* Connection Line 2 with text label and pulsing flow */}
-                        <div style={{ flex: 1, position: 'relative', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-                            <line x1="0%" y1="50%" x2="100%" y2="50%" stroke="rgba(0, 230, 118, 0.15)" strokeWidth="1.5" />
-                            <line 
-                              x1="0%" 
-                              y1="50%" 
-                              x2="100%" 
-                              y2="50%" 
-                              stroke="#00E676" 
-                              strokeWidth="2" 
-                              strokeDasharray="6 20"
-                            >
-                              <animate attributeName="stroke-dashoffset" values="26;0" dur="1.2s" repeatCount="indefinite" />
-                            </line>
-                          </svg>
-                          <div style={{ zIndex: 1, background: '#020305', border: '1px solid rgba(0, 230, 118, 0.25)', borderRadius: '2px', padding: '2px 8px', fontSize: '8px', color: '#00E676', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            CLASSIFYING
-                          </div>
-                        </div>
-
-                        {/* Target Model Node */}
-                        <div style={{ width: '130px', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(5, 7, 10, 0.85)', padding: '12px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
-                            <Globe style={{ width: '12px', height: '12px', color: '#00E676' }} />
-                            <MessageSquare style={{ width: '12px', height: '12px', color: '#00E676' }} />
-                            <PhoneCall style={{ width: '12px', height: '12px', color: '#00E676' }} />
-                            <Camera style={{ width: '12px', height: '12px', color: '#00E676' }} />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>AI DETECTORS</div>
-                            <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>4 Specialist Agents</div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Footer Legend */}
-                      <div style={{ fontSize: '8.5px', color: 'var(--text-muted)', textAlign: 'center', letterSpacing: '0.5px', textTransform: 'uppercase', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '6px' }}>
-                        Automated forensic routing - zero leakage - secure local inference
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '8px' }}>
-                      <div 
-                        className="interactive-welcome-card"
-                        style={{ 
-                          padding: '20px', 
-                          background: 'rgba(2,3,5,0.55)', 
-                          border: '1px solid rgba(0, 230, 118, 0.1)', 
-                          borderRadius: '4px', 
-                          transition: 'all 0.3s ease',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.borderColor = '#00E676';
-                          e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
-                          e.currentTarget.style.boxShadow = 'none';
-                          e.currentTarget.style.transform = 'none';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Globe style={{ width: '14px', height: '14px', color: '#00E676' }} />
-                          <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            [01] PASTE A URL
-                          </span>
-                        </div>
-                        <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
-                          Directs security checks to the Website Investigation module automatically.
-                        </p>
-                      </div>
-
-                      <div 
-                        className="interactive-welcome-card"
-                        style={{ 
-                          padding: '20px', 
-                          background: 'rgba(2,3,5,0.55)', 
-                          border: '1px solid rgba(0, 230, 118, 0.1)', 
-                          borderRadius: '4px', 
-                          transition: 'all 0.3s ease',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.borderColor = '#00E676';
-                          e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
-                          e.currentTarget.style.boxShadow = 'none';
-                          e.currentTarget.style.transform = 'none';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Camera style={{ width: '14px', height: '14px', color: '#00E676' }} />
-                          <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            [02] UPLOAD AN IMAGE
-                          </span>
-                        </div>
-                        <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
-                          Extracts metadata and checks elements via Visual Investigation.
-                        </p>
-                      </div>
-
-                      <div 
-                        className="interactive-welcome-card"
-                        style={{ 
-                          padding: '20px', 
-                          background: 'rgba(2,3,5,0.55)', 
-                          border: '1px solid rgba(0, 230, 118, 0.1)', 
-                          borderRadius: '4px', 
-                          transition: 'all 0.3s ease',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.borderColor = '#00E676';
-                          e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
-                          e.currentTarget.style.boxShadow = 'none';
-                          e.currentTarget.style.transform = 'none';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <PhoneCall style={{ width: '14px', height: '14px', color: '#00E676' }} />
-                          <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            [03] UPLOAD AUDIO
-                          </span>
-                        </div>
-                        <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
-                          Decodes voicemail/calls via Call transcript and Voice analysis.
-                        </p>
-                      </div>
-
-                      <div 
-                        className="interactive-welcome-card"
-                        style={{ 
-                          padding: '20px', 
-                          background: 'rgba(2,3,5,0.55)', 
-                          border: '1px solid rgba(0, 230, 118, 0.1)', 
-                          borderRadius: '4px', 
-                          transition: 'all 0.3s ease',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.borderColor = '#00E676';
-                          e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
-                          e.currentTarget.style.boxShadow = 'none';
-                          e.currentTarget.style.transform = 'none';
-                          e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <MessageSquare style={{ width: '14px', height: '14px', color: '#00E676' }} />
-                          <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            [04] PASTE AN SMS
-                          </span>
-                        </div>
-                        <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
-                          Runs linguistic and sender header checks in SMS Investigation.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'monospace', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '20px', lineHeight: '1.4' }}>
-                      ℹ I'll automatically identify the input type and route it to the correct specialized investigation agent.
-                    </div>
-                  </div>
-                )}
-
-                {/* DRAG AND DROP OVERLAY FOR WORKSPACE */}
-                {isDragging && (
-                  <div 
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      background: 'rgba(2, 3, 5, 0.92)',
-                      backdropFilter: 'blur(10px)',
-                      border: '2px dashed #00E676',
-                      borderRadius: '4px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      zIndex: 1000,
-                      color: '#00E676',
-                      fontFamily: 'monospace',
-                      pointerEvents: 'none'
-                    }}
-                  >
-                    <Upload style={{ width: '48px', height: '48px', marginBottom: '16px', color: '#00E676' }} />
-                    <span style={{ fontSize: '15px', fontWeight: 'bold', letterSpacing: '1px' }}>
-                      DROP FILES HERE TO INGEST
-                    </span>
-                    <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                      Supports screenshots (.png, .jpg) or audio calls (.wav, .mp3)
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Sticky bottom input area */}
-              <div style={{ 
-                padding: '20px 24px', 
-                borderTop: '1px solid rgba(0, 230, 118, 0.15)', 
-                background: 'rgba(2, 3, 5, 0.95)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
-              }}>
-                {/* File preview badge */}
-                {masterAttachedFile && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 230, 118, 0.08)', border: '1px solid rgba(0, 230, 118, 0.2)', padding: '6px 12px', width: 'fit-content' }}>
-                    <span style={{ fontSize: '11px', color: '#00E676', fontFamily: 'monospace' }}>
-                      📎 {masterAttachedFile.name} ({Math.round(masterAttachedFile.size / 1024)} KB)
-                    </span>
-                    <button 
-                      onClick={() => setMasterAttachedFile(null)}
-                      style={{ background: 'transparent', border: 'none', color: '#FF3D00', cursor: 'pointer', fontWeight: 'bold', fontSize: '10px' }}
-                    >
-                      [REMOVE]
-                    </button>
-                  </div>
-                )}
-
-                {/* ChatGPT style Input box */}
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', width: '100%' }}>
-                  {/* File attach input */}
-                  <label 
-                    style={{
-                      width: '40px',
-                      height: '40px',
-                      border: '1px solid rgba(0, 230, 118, 0.25)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      background: 'transparent',
-                      transition: 'border-color 0.2s'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.borderColor = '#00E676'}
-                    onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.25)'}
-                  >
-                    <Upload style={{ width: '16px', height: '16px', color: '#00E676' }} />
-                    <input 
-                      type="file" 
-                      onChange={e => {
-                        if (e.target.files && e.target.files[0]) {
-                          setMasterAttachedFile(e.target.files[0]);
-                        }
-                      }}
-                      style={{ display: 'none' }} 
-                      accept="image/*,audio/*"
-                    />
-                  </label>
-
-                  {/* Text input area */}
-                  <input 
-                    type="text" 
-                    value={masterInputText}
-                    onChange={e => setMasterInputText(e.target.value)}
-                    placeholder="Paste website URL, attach screenshot image/audio call file, or paste SMS text to route..."
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        handleMasterAgentSubmit();
-                      }
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: '12px 16px',
-                      background: '#05070a',
-                      border: '1px solid rgba(0, 230, 118, 0.15)',
-                      color: '#fff',
-                      fontFamily: 'monospace',
-                      fontSize: '13.5px',
-                      outline: 'none',
-                      transition: 'border-color 0.2s'
-                    }}
-                    onFocus={e => e.target.style.borderColor = '#00E676'}
-                    onBlur={e => e.target.style.borderColor = 'rgba(0, 230, 118, 0.15)'}
-                  />
-
-                  {/* Send Action */}
+                  flexDirection: 'column',
+                  gap: '16px',
+                  padding: '16px',
+                  boxSizing: 'border-box',
+                  flexShrink: 0
+                }}>
+                  {/* + New Chat Button */}
                   <button 
-                    onClick={handleMasterAgentSubmit}
-                    disabled={routingState.active || (!masterInputText.trim() && !masterAttachedFile)}
+                    onClick={handleNewChat}
                     style={{
-                      padding: '12px 24px',
-                      background: '#00E676',
-                      border: '1px solid #00E676',
-                      color: '#020305',
+                      width: '100%',
+                      padding: '10px 14px',
+                      background: 'transparent',
+                      border: '1px dashed #00E676',
+                      color: '#00E676',
                       fontWeight: 'bold',
-                      fontSize: '13.5px',
+                      fontSize: '11px',
                       fontFamily: 'monospace',
-                      cursor: (routingState.active || (!masterInputText.trim() && !masterAttachedFile)) ? 'not-allowed' : 'pointer',
-                      opacity: (routingState.active || (!masterInputText.trim() && !masterAttachedFile)) ? 0.5 : 1,
+                      cursor: 'pointer',
+                      borderRadius: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
                       transition: 'all 0.2s'
                     }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.background = 'rgba(0, 230, 118, 0.06)';
+                      e.currentTarget.style.boxShadow = '0 0 10px rgba(0, 230, 118, 0.1)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
                   >
-                    SEND
+                    <span>+</span> NEW THREAT CHAT
                   </button>
+
+                  {/* Recents list title */}
+                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 'bold', fontFamily: 'monospace', marginTop: '8px', textAlign: 'left' }}>
+                    Recent Scans
+                  </div>
+
+                  {/* Chats list */}
+                  <div className="soc-sidebar-scroll" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {chats.map((chat) => {
+                      const isSelected = chat.id === currentChatId;
+                      return (
+                        <div 
+                          key={chat.id}
+                          onClick={() => handleSelectChat(chat.id)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 10px',
+                            background: isSelected ? 'rgba(0, 230, 118, 0.08)' : 'transparent',
+                            border: isSelected ? '1px solid rgba(0, 230, 118, 0.2)' : '1px solid transparent',
+                            color: isSelected ? '#00E676' : 'var(--text-primary)',
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            cursor: 'pointer',
+                            borderRadius: '2px',
+                            textAlign: 'left',
+                            transition: 'all 0.2s',
+                            boxSizing: 'border-box',
+                            position: 'relative',
+                            overflow: 'hidden'
+                          }}
+                          onMouseEnter={e => {
+                            if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                          }}
+                          onMouseLeave={e => {
+                            if (!isSelected) e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <span style={{ 
+                            textOverflow: 'ellipsis', 
+                            overflow: 'hidden', 
+                            whiteSpace: 'nowrap', 
+                            flex: 1, 
+                            marginRight: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                          }}>
+                            <MessageSquare style={{ width: '13px', height: '13px', color: isSelected ? '#00E676' : 'rgba(255,255,255,0.45)', flexShrink: 0 }} />
+                            <span>{chat.title}</span>
+                          </span>
+                          
+                          {/* Delete X Button */}
+                          <span 
+                            onClick={(e) => handleDeleteChat(e, chat.id)}
+                            style={{
+                              fontSize: '9px',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              borderRadius: '2px',
+                              transition: 'color 0.2s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.color = '#FF3D00'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                          >
+                            ✕
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Right side chat feed area */}
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', position: 'relative' }}>
+                  
+                  {/* Chat feed body */}
+                  <div 
+                    style={{ 
+                      flex: 1, 
+                      display: 'flex',
+                      alignItems: copilotMessages.length > 0 ? 'stretch' : 'center',
+                      justifyContent: copilotMessages.length > 0 ? 'flex-start' : 'center',
+                      padding: '24px', 
+                      overflowY: 'auto',
+                      position: 'relative'
+                    }}
+                    className="soc-sidebar-scroll"
+                    onDragEnter={handleDragEnter}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    {routingState.active ? (
+                      /* ROUTING PIPELINE ANIMATION VIEW */
+                      <div style={{ textAlign: 'center', width: '100%', maxWidth: '850px', animation: 'fadeIn 0.3s ease-out', margin: 'auto' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 230, 118, 0.08)', border: '1px solid rgba(0, 230, 118, 0.2)', padding: '6px 14px', borderRadius: '2px', marginBottom: '12px' }}>
+                          <span className="animate-pulse" style={{ width: '6px', height: '6px', background: '#00E676', borderRadius: '50%' }} />
+                          <span style={{ fontSize: '11px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace', textTransform: 'uppercase' }}>
+                            ✓ {routingState.type === 'url' ? 'Website URL' : routingState.type === 'email' ? 'Email Request' : routingState.type === 'image' ? 'Image' : routingState.type === 'audio' ? 'Audio File' : 'SMS Message'} Detected
+                          </span>
+                        </div>
+
+                        <h3 style={{ fontSize: '12px', color: '#fff', margin: '0 0 16px 0', fontFamily: 'monospace', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+                          {getStatusText()}
+                        </h3>
+
+                        {/* SOC 5-Step Status Pipeline Tracker */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '820px', margin: '0 auto 16px auto', padding: '10px 16px', background: 'rgba(2,3,5,0.75)', border: '1px solid rgba(0,230,118,0.15)', borderRadius: '4px', boxSizing: 'border-box' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: activeJunctionIndex >= 0 ? 1 : 0.35, transition: 'all 0.3s' }}>
+                            <span style={{ fontSize: '9px', color: activeJunctionIndex >= 0 ? '#00E676' : 'var(--text-muted)', fontWeight: 'bold', fontFamily: 'monospace' }}>[01] INTENT DETECTED</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: activeJunctionIndex >= 1 ? 1 : 0.35, transition: 'all 0.3s' }}>
+                            <span style={{ fontSize: '9px', color: activeJunctionIndex >= 1 ? '#00E676' : 'var(--text-muted)', fontWeight: 'bold', fontFamily: 'monospace' }}>[02] ROUTE SELECTION</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: activeJunctionIndex >= 2 ? 1 : 0.35, transition: 'all 0.3s' }}>
+                            <span style={{ fontSize: '9px', color: activeJunctionIndex >= 2 ? '#00E676' : 'var(--text-muted)', fontWeight: 'bold', fontFamily: 'monospace' }}>[03] AGENT ACTIVATING</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: activeJunctionIndex >= 3 ? 1 : 0.35, transition: 'all 0.3s' }}>
+                            <span style={{ fontSize: '9px', color: activeJunctionIndex >= 3 ? '#00E676' : 'var(--text-muted)', fontWeight: 'bold', fontFamily: 'monospace' }}>[04] SCAN PROCESSING</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: activeJunctionIndex >= 4 ? 1 : 0.35, transition: 'all 0.3s' }}>
+                            <span style={{ fontSize: '9px', color: activeJunctionIndex >= 4 ? '#00E676' : 'var(--text-muted)', fontWeight: 'bold', fontFamily: 'monospace' }}>[05] COMPLETED</span>
+                          </div>
+                        </div>
+
+                        {/* SVG Branch Pipeline (820px width for 80% available space footprint) */}
+                        <svg width="820" height="360" viewBox="0 0 820 360" style={{ background: 'rgba(2, 3, 5, 0.9)', border: '1px solid rgba(0,230,118,0.25)', borderRadius: '4px', margin: 'auto', display: 'block', boxShadow: '0 12px 48px rgba(0,0,0,0.6)' }}>
+                          <defs>
+                            <filter id="svg-glow" x="-30%" y="-30%" width="160%" height="160%">
+                              <feGaussianBlur stdDeviation="5" result="blur" />
+                              <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                              </feMerge>
+                            </filter>
+                          </defs>
+                          
+                          {/* Decorative Motherboard Background Traces */}
+                          <path d="M 60 60 L 160 60 L 180 100" fill="none" stroke="rgba(0, 230, 118, 0.02)" strokeWidth="1.5" />
+                          <path d="M 120 280 L 200 280 L 220 320" fill="none" stroke="rgba(0, 230, 118, 0.02)" strokeWidth="1.5" />
+                          
+                          {/* Connection base path */}
+                          <path d="M 100 180 L 220 180" fill="none" stroke={activeJunctionIndex >= 0 ? "rgba(0, 230, 118, 0.45)" : "rgba(255, 255, 255, 0.05)"} strokeWidth="3.5" style={{ transition: 'stroke 0.3s' }} />
+                          
+                          {/* Branch paths with rounded corners */}
+                          <path d="M 220 180 Q 250 180 250 140 L 250 68 Q 250 48 280 48 L 580 48" fill="none" stroke={routingState.type === 'url' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.03)"} strokeWidth={routingState.type === 'url' ? '3' : '1.5'} style={{ transition: 'stroke 0.3s', opacity: routingState.type === 'url' ? 1 : 0.2 }} />
+                          <path d="M 220 180 Q 250 180 250 150 L 250 128 Q 250 108 280 108 L 580 108" fill="none" stroke={routingState.type === 'email' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.03)"} strokeWidth={routingState.type === 'email' ? '3' : '1.5'} style={{ transition: 'stroke 0.3s', opacity: routingState.type === 'email' ? 1 : 0.2 }} />
+                          <path d="M 220 180 Q 250 180 250 174 L 250 174 Q 250 168 280 168 L 580 168" fill="none" stroke={routingState.type === 'sms' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.03)"} strokeWidth={routingState.type === 'sms' ? '3' : '1.5'} style={{ transition: 'stroke 0.3s', opacity: routingState.type === 'sms' ? 1 : 0.2 }} />
+                          <path d="M 220 180 Q 250 180 250 190 L 250 208 Q 250 228 280 228 L 580 228" fill="none" stroke={routingState.type === 'audio' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.03)"} strokeWidth={routingState.type === 'audio' ? '3' : '1.5'} style={{ transition: 'stroke 0.3s', opacity: routingState.type === 'audio' ? 1 : 0.2 }} />
+                          <path d="M 220 180 Q 250 180 250 220 L 250 268 Q 250 288 280 288 L 580 288" fill="none" stroke={routingState.type === 'image' ? "rgba(0, 230, 118, 0.6)" : "rgba(255,255,255,0.03)"} strokeWidth={routingState.type === 'image' ? '3' : '1.5'} style={{ transition: 'stroke 0.3s', opacity: routingState.type === 'image' ? 1 : 0.2 }} />
+                          
+                          {/* Glowing active path trace (Tron Light Trail) */}
+                          {routingState.type && (
+                            <path d={getActivePathD()} fill="none" stroke="#00E676" strokeWidth="3" filter="url(#svg-glow)" strokeDasharray="40, 220" strokeDashoffset="0">
+                              <animate attributeName="strokeDashoffset" values="260;0" dur="1s" repeatCount="indefinite" />
+                            </path>
+                          )}
+     
+                          {/* Radar Circular Pulse */}
+                          <circle cx="100" cy="180" r="18" fill="rgba(0, 230, 118, 0.12)">
+                            <animate attributeName="r" values="18;45" dur="1.2s" repeatCount="indefinite" />
+                            <animate attributeName="opacity" values="1;0" dur="1.2s" repeatCount="indefinite" />
+                          </circle>
+     
+                          {/* Outer pulsing ring for Master node */}
+                          <circle cx="100" cy="180" r="20" fill="none" stroke="#00E676" strokeWidth="2" opacity="0.6">
+                            <animate attributeName="stroke-width" values="2;4;2" dur="1.5s" repeatCount="indefinite" />
+                            <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite" />
+                          </circle>
+     
+                          {/* Master agent source node */}
+                          <circle cx="100" cy="180" r="18" fill="#020305" stroke="#00E676" strokeWidth="2.5" filter="url(#svg-glow)" />
+                          
+                          {/* Shield icon with spinning rotation animation inside node */}
+                          <g transform="translate(100, 180)">
+                            <g>
+                              <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="6s" repeatCount="indefinite" />
+                              <path d="M -5 -6 L 5 -6 L 5 -2 C 5 2, 0 6, 0 6 C 0 6, -5 2, -5 -2 Z" fill="none" stroke="#00E676" strokeWidth="1.5" />
+                            </g>
+                          </g>
+                          
+                          <text x="100" y="214" fill="#00E676" fontSize="9.5" fontFamily="monospace" textAnchor="middle" fontWeight="bold" letterSpacing="0.8px">MASTER_COPA</text>
+     
+                          {/* Junction Nodes along paths that light up sequentially */}
+                          {/* Junction 1: Split Entrance */}
+                          <circle cx="220" cy="180" r="5" fill={activeJunctionIndex >= 1 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 1 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 1 ? "url(#svg-glow)" : "none"} style={{ transition: 'all 0.3s' }} />
+                          <circle cx="220" cy="180" r={activeJunctionIndex >= 1 ? 9 : 0} fill="none" stroke="#00E676" strokeWidth="1" opacity={activeJunctionIndex >= 1 ? 0.8 : 0} style={{ transition: 'all 0.3s' }}>
+                            <animate attributeName="r" values="5;14;5" dur="1s" repeatCount="indefinite" />
+                          </circle>
+     
+                          {/* Junction 2 & 3: Curve Bend Splits */}
+                          {(() => {
+                            const coords = getJunctionCoords();
+                            if (!coords) return null;
+                            return (
+                              <g style={{ transition: 'all 0.3s' }}>
+                                <circle cx={coords.x1} cy={coords.y1} r="4.5" fill={activeJunctionIndex >= 2 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 2 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 2 ? "url(#svg-glow)" : "none"} />
+                                <circle cx={coords.x2} cy={coords.y2} r="4.5" fill={activeJunctionIndex >= 3 ? "#00E676" : "#0c0d0f"} stroke={activeJunctionIndex >= 3 ? "#00E676" : "rgba(255,255,255,0.15)"} strokeWidth="1.5" filter={activeJunctionIndex >= 3 ? "url(#svg-glow)" : "none"} />
+                              </g>
+                            );
+                          })()}
+     
+                          {/* Moving Energy Sphere Payload with Motion Blur */}
+                          {routingState.type && (
+                            <circle r="7" fill="#00E676" filter="url(#svg-glow)">
+                              <animateMotion dur="2.4s" repeatCount="1" fill="freeze" path={getActivePathD()} />
+                            </circle>
+                          )}
+     
+                          {/* Destinations (tron-themed rect tag headers) */}
+                          {/* 1. Website */}
+                          <g transform="translate(580, 34)" style={{ opacity: routingState.type === 'url' ? 1 : 0.2, transition: 'all 0.3s' }}>
+                            <rect width="200" height="28" rx="2" fill="rgba(2,3,5,0.9)" stroke={routingState.type === 'url' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1.5" filter={routingState.type === 'url' ? "url(#svg-glow)" : "none"} />
+                            <text x="12" y="18" fill={routingState.type === 'url' ? "#00E676" : "var(--text-muted)"} fontSize="10.5" fontFamily="monospace" fontWeight={routingState.type === 'url' ? "bold" : "normal"}>Web & QR Scan</text>
+                            {routingState.type === 'url' && activeJunctionIndex >= 4 && (
+                              <circle cx="188" cy="14" r="3.5" fill="#00E676" filter="url(#svg-glow)" />
+                            )}
+                          </g>
+     
+                          {/* 2. Email */}
+                          <g transform="translate(580, 94)" style={{ opacity: routingState.type === 'email' ? 1 : 0.2, transition: 'all 0.3s' }}>
+                            <rect width="200" height="28" rx="2" fill="rgba(2,3,5,0.9)" stroke={routingState.type === 'email' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1.5" filter={routingState.type === 'email' ? "url(#svg-glow)" : "none"} />
+                            <text x="12" y="18" fill={routingState.type === 'email' ? "#00E676" : "var(--text-muted)"} fontSize="10.5" fontFamily="monospace" fontWeight={routingState.type === 'email' ? "bold" : "normal"}>Email Investigation</text>
+                            {routingState.type === 'email' && activeJunctionIndex >= 4 && (
+                              <circle cx="188" cy="14" r="3.5" fill="#00E676" filter="url(#svg-glow)" />
+                            )}
+                          </g>
+     
+                          {/* 3. SMS */}
+                          <g transform="translate(580, 154)" style={{ opacity: routingState.type === 'sms' ? 1 : 0.2, transition: 'all 0.3s' }}>
+                            <rect width="200" height="28" rx="2" fill="rgba(2,3,5,0.9)" stroke={routingState.type === 'sms' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1.5" filter={routingState.type === 'sms' ? "url(#svg-glow)" : "none"} />
+                            <text x="12" y="18" fill={routingState.type === 'sms' ? "#00E676" : "var(--text-muted)"} fontSize="10.5" fontFamily="monospace" fontWeight={routingState.type === 'sms' ? "bold" : "normal"}>SMS Investigation</text>
+                            {routingState.type === 'sms' && activeJunctionIndex >= 4 && (
+                              <circle cx="188" cy="14" r="3.5" fill="#00E676" filter="url(#svg-glow)" />
+                            )}
+                          </g>
+     
+                          {/* 4. Call Analysis */}
+                          <g transform="translate(580, 214)" style={{ opacity: routingState.type === 'audio' ? 1 : 0.2, transition: 'all 0.3s' }}>
+                            <rect width="200" height="28" rx="2" fill="rgba(2,3,5,0.9)" stroke={routingState.type === 'audio' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1.5" filter={routingState.type === 'audio' ? "url(#svg-glow)" : "none"} />
+                            <text x="12" y="18" fill={routingState.type === 'audio' ? "#00E676" : "var(--text-muted)"} fontSize="10.5" fontFamily="monospace" fontWeight={routingState.type === 'audio' ? "bold" : "normal"}>Call Analysis</text>
+                            {routingState.type === 'audio' && activeJunctionIndex >= 4 && (
+                              <circle cx="188" cy="14" r="3.5" fill="#00E676" filter="url(#svg-glow)" />
+                            )}
+                          </g>
+     
+                          {/* 5. Visual Investigation */}
+                          <g transform="translate(580, 274)" style={{ opacity: routingState.type === 'image' ? 1 : 0.2, transition: 'all 0.3s' }}>
+                            <rect width="200" height="28" rx="2" fill="rgba(2,3,5,0.9)" stroke={routingState.type === 'image' ? "#00E676" : "rgba(255,255,255,0.06)"} strokeWidth="1.5" filter={routingState.type === 'image' ? "url(#svg-glow)" : "none"} />
+                            <text x="12" y="18" fill={routingState.type === 'image' ? "#00E676" : "var(--text-muted)"} fontSize="10.5" fontFamily="monospace" fontWeight={routingState.type === 'image' ? "bold" : "normal"}>Visual Investigation</text>
+                            {routingState.type === 'image' && activeJunctionIndex >= 4 && (
+                              <circle cx="188" cy="14" r="3.5" fill="#00E676" filter="url(#svg-glow)" />
+                            )}
+                          </g>
+                        </svg>
+                      </div>
+                    ) : copilotMessages.length > 0 ? (
+                      /* CONVERSATIONAL FEED */
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '800px', margin: '0 auto', flexGrow: 1 }}>
+                        {copilotMessages.map((msg) => (
+                          <div 
+                            key={msg.id} 
+                            style={{ 
+                              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                              width: msg.role === 'user' ? 'auto' : '100%',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                              animation: 'fadeIn 0.25s ease-out'
+                            }}
+                          >
+                            {/* Bubble */}
+                            <div 
+                              style={{
+                                background: msg.role === 'user' ? 'rgba(0, 230, 118, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                                border: msg.role === 'user' ? '1px solid rgba(0, 230, 118, 0.2)' : '1px solid rgba(255, 255, 255, 0.05)',
+                                padding: '12px 16px',
+                                borderRadius: '4px',
+                                maxWidth: msg.role === 'user' ? '85%' : '100%',
+                                color: '#fff',
+                                textAlign: 'left',
+                                fontFamily: msg.role === 'user' ? 'monospace' : 'inherit',
+                                fontSize: '13.5px',
+                                lineHeight: '1.5',
+                                whiteSpace: 'pre-wrap',
+                                position: 'relative'
+                              }}
+                            >
+                              {/* User Attached File Name */}
+                              {msg.file && (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.3)', padding: '4px 8px', borderRadius: '2px', marginBottom: '8px', fontSize: '11px', color: '#00E676', border: '1px solid rgba(0,230,118,0.1)' }}>
+                                  📎 Ingested: {msg.file.name}
+                                </div>
+                              )}
+
+                              {/* Assistant Status Spinner */}
+                              {msg.role === 'assistant' && msg.status && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#00E676', fontSize: '12px', fontFamily: 'monospace', marginBottom: '8px', fontWeight: 'bold' }}>
+                                  <RefreshCw style={{ width: '12px', height: '12px' }} className="animate-spin" />
+                                  <span>{msg.status}</span>
+                                </div>
+                              )}
+
+                              {/* Message Content */}
+                              <div>{msg.content}</div>
+
+                              {/* Inline Card Payloads */}
+                              {msg.role === 'assistant' && renderCopilotPayload(msg.payload)}
+
+                              {/* Tech Trace logs collapsible */}
+                              {msg.role === 'assistant' && msg.logs && msg.logs.length > 0 && (
+                                <details style={{ marginTop: '10px', borderTop: '1px dashed rgba(255,255,255,0.06)', paddingTop: '6px' }}>
+                                  <summary style={{ fontSize: '9px', color: '#00E676', cursor: 'pointer', fontFamily: 'monospace', outline: 'none', fontWeight: 'bold' }}>
+                                    [TECH TRACE LOGS ({msg.logs.length})]
+                                  </summary>
+                                  <div style={{ background: '#05070a', border: '1px solid rgba(255,255,255,0.05)', padding: '8px', marginTop: '6px', fontFamily: 'monospace', fontSize: '9px', maxHeight: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {msg.logs.map((log, lIdx) => (
+                                      <div key={lIdx} style={{ color: log.status === 'Failed' ? '#FF3D00' : '#00E676' }}>
+                                        {`[${log.agent}] ${log.action} -> ${log.status} (${log.latency_ms}ms)`}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        <div ref={copilotChatEndRef} />
+                      </div>
+                    ) : (
+                      /* DEFAULT LANDING WELCOME WORKSPACE */
+                      <div style={{ maxWidth: '660px', margin: 'auto', display: 'flex', flexDirection: 'column', gap: '32px', textAlign: 'left', padding: '20px', animation: 'fadeIn 0.4s ease-out' }}>
+                        <div>
+                          <h1 style={{ fontSize: '38px', fontWeight: 'bold', color: '#fff', fontFamily: 'monospace', margin: '0 0 10px 0', letterSpacing: '1.5px', minHeight: '46px' }}>
+                            <Typewriter text="Hello." delay={100} onComplete={() => setStartSecondLine(true)} />
+                          </h1>
+                          <div style={{ fontSize: '17px', color: '#00E676', fontFamily: 'monospace', margin: 0, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.8px', minHeight: '24px', display: 'flex', alignItems: 'center' }}>
+                            {startSecondLine && (
+                              <>
+                                <Typewriter text="I'm the ScamON AI Master Agent." delay={55} />
+                                <span className="blinking-cursor" style={{ 
+                                  display: 'inline-block',
+                                  width: '8px',
+                                  height: '16px',
+                                  backgroundColor: '#00E676',
+                                  marginLeft: '6px',
+                                  animation: 'blink 1s step-end infinite'
+                                }}></span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* INFERENCE-PATH STYLE PIPELINE BOX */}
+                        <div style={{
+                          background: 'rgba(2, 3, 5, 0.75)',
+                          border: '1px solid rgba(0, 230, 118, 0.15)',
+                          borderRadius: '4px',
+                          padding: '16px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '12px',
+                          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                          fontFamily: 'monospace'
+                        }}>
+                          {/* Window Header */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9.5px', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '8px' }}>
+                            <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FF3D00' }} />
+                              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#FFC400' }} />
+                              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00E676' }} />
+                              <span style={{ marginLeft: '6px', letterSpacing: '1px', textTransform: 'uppercase' }}>TRIAGE-PIPELINE</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#00E676' }}>
+                              <span>●</span>
+                              <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>REAL-TIME ROUTING</span>
+                            </div>
+                          </div>
+
+                          {/* Pipeline Flow Ingress Container */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 10px', position: 'relative' }}>
+                            {/* Device / Client Node */}
+                            <div style={{ width: '110px', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(5, 7, 10, 0.85)', padding: '12px 8px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', transition: 'border-color 0.3s' }}>
+                              <Upload style={{ width: '18px', height: '18px', color: '#00E676' }} />
+                              <div>
+                                <div style={{ fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>USER INPUT</div>
+                                <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>Text / Media file</div>
+                              </div>
+                            </div>
+
+                            {/* Connection Line 1 with text label and pulsing flow */}
+                            <div style={{ flex: 1, position: 'relative', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {/* SVG Flow Trace */}
+                              <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+                                <line x1="0%" y1="50%" x2="100%" y2="50%" stroke="rgba(0, 230, 118, 0.15)" strokeWidth="1.5" />
+                                <line 
+                                  x1="0%" 
+                                  y1="50%" 
+                                  x2="100%" 
+                                  y2="50%" 
+                                  stroke="#00E676" 
+                                  strokeWidth="2" 
+                                  strokeDasharray="6 20"
+                                >
+                                  <animate attributeName="stroke-dashoffset" values="26;0" dur="1.2s" repeatCount="indefinite" />
+                                </line>
+                              </svg>
+                              <div style={{ zIndex: 1, background: '#020305', border: '1px solid rgba(0, 230, 118, 0.25)', borderRadius: '2px', padding: '2px 8px', fontSize: '8px', color: '#00E676', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                INGESTING
+                              </div>
+                            </div>
+
+                            {/* Cognitive Core Node */}
+                            <div style={{ width: '120px', border: '1px solid #00E676', background: 'rgba(5, 7, 10, 0.85)', padding: '12px 8px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', boxShadow: '0 0 10px rgba(0, 230, 118, 0.1)' }}>
+                              <Shield style={{ width: '18px', height: '18px', color: '#00E676' }} className="animate-pulse" />
+                              <div>
+                                <div style={{ fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>COGNITIVE CORE</div>
+                                <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>Triage Classifier</div>
+                              </div>
+                            </div>
+
+                            {/* Connection Line 2 with text label and pulsing flow */}
+                            <div style={{ flex: 1, position: 'relative', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+                                <line x1="0%" y1="50%" x2="100%" y2="50%" stroke="rgba(0, 230, 118, 0.15)" strokeWidth="1.5" />
+                                <line 
+                                  x1="0%" 
+                                  y1="50%" 
+                                  x2="100%" 
+                                  y2="50%" 
+                                  stroke="#00E676" 
+                                  strokeWidth="2" 
+                                  strokeDasharray="6 20"
+                                >
+                                  <animate attributeName="stroke-dashoffset" values="26;0" dur="1.2s" repeatCount="indefinite" />
+                                </line>
+                              </svg>
+                              <div style={{ zIndex: 1, background: '#020305', border: '1px solid rgba(0, 230, 118, 0.25)', borderRadius: '2px', padding: '2px 8px', fontSize: '8px', color: '#00E676', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                CLASSIFYING
+                              </div>
+                            </div>
+
+                            {/* Target Model Node */}
+                            <div style={{ width: '130px', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(5, 7, 10, 0.85)', padding: '12px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                              <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                                <Globe style={{ width: '12px', height: '12px', color: '#00E676' }} />
+                                <Mail style={{ width: '12px', height: '12px', color: '#00E676' }} />
+                                <MessageSquare style={{ width: '12px', height: '12px', color: '#00E676' }} />
+                                <PhoneCall style={{ width: '12px', height: '12px', color: '#00E676' }} />
+                                <Camera style={{ width: '12px', height: '12px', color: '#00E676' }} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>AI DETECTORS</div>
+                                <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>5 Specialist Agents</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Footer Legend */}
+                          <div style={{ fontSize: '8.5px', color: 'var(--text-muted)', textAlign: 'center', letterSpacing: '0.5px', textTransform: 'uppercase', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '6px' }}>
+                            Automated forensic routing - zero leakage - secure local inference
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '8px' }}>
+                          <div 
+                            className="interactive-welcome-card"
+                            style={{ 
+                              padding: '20px', 
+                              background: 'rgba(2,3,5,0.55)', 
+                              border: '1px solid rgba(0, 230, 118, 0.1)', 
+                              borderRadius: '4px', 
+                              transition: 'all 0.3s ease',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.borderColor = '#00E676';
+                              e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'none';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Globe style={{ width: '14px', height: '14px', color: '#00E676' }} />
+                              <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                [01] PASTE A URL
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
+                              Directs security checks to the Website Investigation module automatically.
+                            </p>
+                          </div>
+
+                          <div 
+                            className="interactive-welcome-card"
+                            style={{ 
+                              padding: '20px', 
+                              background: 'rgba(2,3,5,0.55)', 
+                              border: '1px solid rgba(0, 230, 118, 0.1)', 
+                              borderRadius: '4px', 
+                              transition: 'all 0.3s ease',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.borderColor = '#00E676';
+                              e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'none';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Camera style={{ width: '14px', height: '14px', color: '#00E676' }} />
+                              <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                [02] UPLOAD AN IMAGE
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
+                              Extracts metadata and checks elements via Visual Investigation.
+                            </p>
+                          </div>
+
+                          <div 
+                            className="interactive-welcome-card"
+                            style={{ 
+                              padding: '20px', 
+                              background: 'rgba(2,3,5,0.55)', 
+                              border: '1px solid rgba(0, 230, 118, 0.1)', 
+                              borderRadius: '4px', 
+                              transition: 'all 0.3s ease',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.borderColor = '#00E676';
+                              e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'none';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <PhoneCall style={{ width: '14px', height: '14px', color: '#00E676' }} />
+                              <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                [03] UPLOAD AUDIO
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
+                              Decodes voicemail/calls via Call transcript and Voice analysis.
+                            </p>
+                          </div>
+
+                          <div 
+                            className="interactive-welcome-card"
+                            style={{ 
+                              padding: '20px', 
+                              background: 'rgba(2,3,5,0.55)', 
+                              border: '1px solid rgba(0, 230, 118, 0.1)', 
+                              borderRadius: '4px', 
+                              transition: 'all 0.3s ease',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.borderColor = '#00E676';
+                              e.currentTarget.style.boxShadow = '0 0 15px rgba(0, 230, 118, 0.15)';
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.8)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.1)';
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'none';
+                              e.currentTarget.style.background = 'rgba(2,3,5,0.55)';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <MessageSquare style={{ width: '14px', height: '14px', color: '#00E676' }} />
+                              <span style={{ fontSize: '12.5px', color: '#00E676', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                [04] PASTE AN SMS
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, fontFamily: 'monospace', lineHeight: '1.45' }}>
+                              Runs linguistic and sender header checks in SMS Investigation.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'monospace', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '20px', lineHeight: '1.4' }}>
+                          ℹ I'll automatically identify the input type and route it to the correct specialized investigation agent.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* DRAG AND DROP OVERLAY FOR WORKSPACE */}
+                    {isDragging && (
+                      <div 
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          background: 'rgba(2, 3, 5, 0.92)',
+                          backdropFilter: 'blur(10px)',
+                          border: '2px dashed #00E676',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          zIndex: 1000,
+                          color: '#00E676',
+                          fontFamily: 'monospace',
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        <Upload style={{ width: '48px', height: '48px', marginBottom: '16px', color: '#00E676' }} />
+                        <span style={{ fontSize: '15px', fontWeight: 'bold', letterSpacing: '1px' }}>
+                          DROP FILES HERE TO INGEST
+                        </span>
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                          Supports screenshots (.png, .jpg) or audio calls (.wav, .mp3)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sticky bottom input area */}
+                  <div style={{ 
+                    padding: '20px 24px', 
+                    borderTop: '1px solid rgba(0, 230, 118, 0.15)', 
+                    background: 'rgba(2, 3, 5, 0.95)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    {/* Gmail Reconnect Prompt */}
+                    {copilotGmailAuthUrl && (
+                      <div style={{ padding: '8px 16px', background: 'rgba(255,61,0,0.1)', border: '1px solid rgba(255,61,0,0.3)', color: '#FF3D00', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', fontFamily: 'monospace', marginBottom: '4px' }}>
+                        <span>Warning: Gmail connection disconnected. Re-authorization required.</span>
+                        <button 
+                          onClick={() => {
+                            window.open(copilotGmailAuthUrl, '_blank');
+                            setCopilotGmailAuthUrl(null);
+                          }}
+                          className="btn-primary"
+                          style={{ padding: '4px 10px', fontSize: '9px', background: '#FF3D00', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 'bold', width: 'auto' }}
+                        >
+                          CONNECT GMAIL
+                        </button>
+                      </div>
+                    )}
+
+                    {/* File preview badge */}
+                    {masterAttachedFile && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 230, 118, 0.08)', border: '1px solid rgba(0, 230, 118, 0.2)', padding: '6px 12px', width: 'fit-content' }}>
+                        <span style={{ fontSize: '11px', color: '#00E676', fontFamily: 'monospace' }}>
+                          📎 {masterAttachedFile.name} ({Math.round(masterAttachedFile.size / 1024)} KB)
+                        </span>
+                        <button 
+                          onClick={() => setMasterAttachedFile(null)}
+                          style={{ background: 'transparent', border: 'none', color: '#FF3D00', cursor: 'pointer', fontWeight: 'bold', fontSize: '10px' }}
+                        >
+                          [REMOVE]
+                        </button>
+                      </div>
+                    )}
+
+                    {/* ChatGPT style Input box */}
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', width: '100%' }}>
+                      {/* File attach input */}
+                      <label 
+                        style={{
+                          width: '40px',
+                          height: '40px',
+                          border: '1px solid rgba(0, 230, 118, 0.25)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          background: 'transparent',
+                          transition: 'border-color 0.2s'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = '#00E676'}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(0, 230, 118, 0.25)'}
+                      >
+                        <Upload style={{ width: '16px', height: '16px', color: '#00E676' }} />
+                        <input 
+                          type="file" 
+                          onChange={e => {
+                            if (e.target.files && e.target.files[0]) {
+                              setMasterAttachedFile(e.target.files[0]);
+                            }
+                          }}
+                          style={{ display: 'none' }} 
+                          accept="image/*,audio/*"
+                          disabled={routingState.active || copilotLoading}
+                        />
+                      </label>
+
+                      {/* Text input area */}
+                      <input 
+                        type="text" 
+                        value={masterInputText}
+                        onChange={e => setMasterInputText(e.target.value)}
+                        placeholder={copilotLoading ? "Security Copilot is scanning..." : "Paste website URL, attach screenshot image/audio call file, or type questions..."}
+                        disabled={routingState.active || copilotLoading}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            handleMasterAgentSubmit();
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '12px 16px',
+                          background: '#05070a',
+                          border: '1px solid rgba(0, 230, 118, 0.15)',
+                          color: '#fff',
+                          fontFamily: 'monospace',
+                          fontSize: '13.5px',
+                          outline: 'none',
+                          transition: 'border-color 0.2s'
+                        }}
+                        onFocus={e => e.target.style.borderColor = '#00E676'}
+                        onBlur={e => e.target.style.borderColor = 'rgba(0, 230, 118, 0.15)'}
+                      />
+
+                      {/* Send Action */}
+                      <button 
+                        onClick={handleMasterAgentSubmit}
+                        disabled={routingState.active || copilotLoading || (!masterInputText.trim() && !masterAttachedFile)}
+                        style={{
+                          padding: '12px 24px',
+                          background: '#00E676',
+                          border: '1px solid #00E676',
+                          color: '#020305',
+                          fontWeight: 'bold',
+                          fontSize: '13.5px',
+                          fontFamily: 'monospace',
+                          cursor: (routingState.active || copilotLoading || (!masterInputText.trim() && !masterAttachedFile)) ? 'not-allowed' : 'pointer',
+                          opacity: (routingState.active || copilotLoading || (!masterInputText.trim() && !masterAttachedFile)) ? 0.5 : 1,
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        SEND
+                      </button>
+                    </div>
+                  </div>
+
                 </div>
               </div>
-
             </div>
           )}
 

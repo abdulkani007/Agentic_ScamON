@@ -70,6 +70,11 @@ app.include_router(sms_router)
 from agents.visual_scam import visual_scam_router
 app.include_router(visual_scam_router)
 
+# Register Master Copilot Agent router
+from agents.copilot_routes import router as copilot_router
+app.include_router(copilot_router)
+
+
 
 @app.on_event("startup")
 async def verify_db_connection():

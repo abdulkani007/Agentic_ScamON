@@ -61,24 +61,102 @@ def flush_dns() -> None:
     pass
 
 
+HOSTS_PATH = r"C:\Windows\System32\drivers\etc\hosts"
+
+
 def add_to_hosts_file(domain: str) -> None:
-    """Hosts file add mock."""
-    pass
+    """Adds a domain to the system hosts file mapping it to 127.0.0.1."""
+    if not os.path.exists(HOSTS_PATH):
+        logger.warning(f"Hosts file not found at {HOSTS_PATH}")
+        return
+
+    target = domain.lower().strip()
+    domains_to_add = [target]
+    if not target.startswith("www."):
+        domains_to_add.append(f"www.{target}")
+
+    # Read current content to prevent duplicates
+    with open(HOSTS_PATH, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    existing_domains = set()
+    for line in lines:
+        line_strip = line.strip()
+        if line_strip and not line_strip.startswith("#"):
+            parts = line_strip.split()
+            if len(parts) >= 2 and parts[0] in ("127.0.0.1", "0.0.0.0"):
+                for d in parts[1:]:
+                    existing_domains.add(d.lower())
+
+    to_append = []
+    for d in domains_to_add:
+        if d not in existing_domains:
+            to_append.append(f"\n127.0.0.1 {d}")
+
+    if to_append:
+        with open(HOSTS_PATH, "a", encoding="utf-8") as f:
+            for line in to_append:
+                f.write(line)
 
 
 def remove_from_hosts_file(domain: str) -> None:
-    """Hosts file remove mock."""
-    pass
+    """Removes a domain mapping from the system hosts file."""
+    if not os.path.exists(HOSTS_PATH):
+        logger.warning(f"Hosts file not found at {HOSTS_PATH}")
+        return
+
+    target = domain.lower().strip()
+    targets = [target, f"www.{target}"] if not target.startswith("www.") else [target, target[4:]]
+
+    with open(HOSTS_PATH, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    new_lines = []
+    modified = False
+    for line in lines:
+        line_lower = line.lower()
+        is_target_line = False
+        if not line_lower.strip().startswith("#"):
+            parts = line_lower.strip().split()
+            if len(parts) >= 2 and parts[0] in ("127.0.0.1", "0.0.0.0"):
+                for part in parts[1:]:
+                    if part in targets:
+                        is_target_line = True
+                        break
+        
+        if is_target_line:
+            modified = True
+        else:
+            new_lines.append(line)
+
+    if modified:
+        with open(HOSTS_PATH, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
 
 
 def verify_hosts_blocked(domain: str) -> bool:
-    """Hosts check mock."""
-    return True
+    """Verifies if the domain is mapped to 127.0.0.1 or 0.0.0.0 in the hosts file."""
+    if not os.path.exists(HOSTS_PATH):
+        return False
+    target = domain.lower().strip()
+    try:
+        with open(HOSTS_PATH, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line_strip = line.strip()
+                if line_strip and not line_strip.startswith("#"):
+                    parts = line_strip.split()
+                    if len(parts) >= 2 and parts[0] in ("127.0.0.1", "0.0.0.0"):
+                        for d in parts[1:]:
+                            if d.lower() == target:
+                                return True
+        return False
+    except Exception:
+        return False
 
 
 def verify_hosts_unblocked(domain: str) -> bool:
-    """Hosts check mock."""
-    return True
+    """Verifies that the domain is not mapped to 127.0.0.1 or 0.0.0.0 in the hosts file."""
+    return not verify_hosts_blocked(domain)
 
 
 def is_domain_blocked(domain: str) -> bool:
@@ -186,7 +264,7 @@ def block_domain(
     threat_type: str = "",
     blocked_by: str = "Website Investigation Agent"
 ) -> Dict[str, Any]:
-    """Blocks a domain by adding it to the DB."""
+    """Blocks a domain by adding it to the DB and updating the hosts file."""
     target = normalize_domain_name(domain)
     target_url = url or f"https://{target}"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -198,6 +276,17 @@ def block_domain(
             "error": "Conflict",
             "admin_error": False,
         }
+
+    # Try modifying system hosts file
+    admin_error = False
+    hosts_msg = ""
+    try:
+        add_to_hosts_file(target)
+    except PermissionError:
+        admin_error = True
+        hosts_msg = " [Note: System-level DNS blocking requires Administrator privileges]"
+    except Exception as he:
+        logger.error(f"Failed to modify hosts file: {he}")
 
     # 1. Add/Update Database blocked_websites
     db = get_db()
@@ -258,22 +347,33 @@ def block_domain(
     db_success = True
 
     # 4. Log to history
-    log_block_history(target, "block", True, reason)
+    log_block_history(target, "block", not admin_error, f"{reason}{hosts_msg}")
 
     return {
         "success": True,
-        "message": "Website Successfully Blocked.",
+        "message": f"Website Successfully Blocked.{hosts_msg}",
         "error": None,
-        "admin_error": False,
+        "admin_error": admin_error,
         "blocked_time": timestamp,
         "blocked_by": blocked_by
     }
 
 
 def unblock_domain(domain: str) -> Dict[str, Any]:
-    """Unblocks a domain by removing block status from DB."""
+    """Unblocks a domain by removing block status from DB and hosts file."""
     target = normalize_domain_name(domain)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # Try modifying system hosts file
+    admin_error = False
+    hosts_msg = ""
+    try:
+        remove_from_hosts_file(target)
+    except PermissionError:
+        admin_error = True
+        hosts_msg = " [Note: System-level DNS unblocking requires Administrator privileges]"
+    except Exception as he:
+        logger.error(f"Failed to modify hosts file: {he}")
 
     # 1. Update Database blocked_websites
     db = get_db()
@@ -309,11 +409,11 @@ def unblock_domain(domain: str) -> Dict[str, Any]:
     db_success = True
 
     # Log to history
-    log_block_history(target, "unblock", True, "Successfully unblocked.")
+    log_block_history(target, "unblock", not admin_error, f"Successfully unblocked.{hosts_msg}")
 
     return {
         "success": True,
-        "message": "Website Successfully Unblocked.",
+        "message": f"Website Successfully Unblocked.{hosts_msg}",
         "error": None,
-        "admin_error": False,
+        "admin_error": admin_error,
     }

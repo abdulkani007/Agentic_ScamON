@@ -1103,13 +1103,15 @@ async def api_block_website(req: WebsiteBlockRequest) -> WebsiteActionResponse:
         )
         return WebsiteActionResponse(
             success=res["success"],
-            message=res["message"]
+            message=res["message"],
+            admin_error=res.get("admin_error", False)
         )
     except Exception as err:
         logger.error(f"Failed to block website via API: {err}")
         return WebsiteActionResponse(
             success=False,
-            message=f"Internal error: {str(err)}"
+            message=f"Internal error: {str(err)}",
+            admin_error=False
         )
 
 
@@ -1124,13 +1126,15 @@ async def api_unblock_website(req: WebsiteUnblockRequest) -> WebsiteActionRespon
         res = unblock_domain(req.domain)
         return WebsiteActionResponse(
             success=res["success"],
-            message=res["message"]
+            message=res["message"],
+            admin_error=res.get("admin_error", False)
         )
     except Exception as err:
         logger.error(f"Failed to unblock website via API: {err}")
         return WebsiteActionResponse(
             success=False,
-            message=f"Internal error: {str(err)}"
+            message=f"Internal error: {str(err)}",
+            admin_error=False
         )
 
 

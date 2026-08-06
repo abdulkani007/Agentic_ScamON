@@ -167,6 +167,7 @@ class WebsiteUnblockRequest(BaseModel):
 class WebsiteActionResponse(BaseModel):
     success: bool = Field(..., description="Whether the block/unblock action succeeded.")
     message: str = Field(..., description="Status summary message.")
+    admin_error: Optional[bool] = Field(default=False, description="Whether an administrator permission error occurred.")
 
 
 class WebsiteCheckResponse(BaseModel):

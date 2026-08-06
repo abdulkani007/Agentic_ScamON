@@ -28,3 +28,11 @@ Thumbs.db
 # Credentials
 **/token.json
 **/client_secret_*.json
+
+# ScamON AI dynamically generated files
+backend/services/profiles/
+backend/static/screenshots/
+backend/static/complaints/
+backend/static/visuals/
+backend/services/sms_collector/status.json
+backend/static/protection_db.json

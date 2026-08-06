@@ -268,7 +268,7 @@ export default function LandingPage({ onStartAnalysis }) {
           </span>
         </div>
         
-        <nav style={{ display: 'flex', gap: '30px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        <nav style={{ display: 'flex', gap: '30px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', alignItems: 'center' }}>
           <a href="#features" className="nav-link-hover" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Features</a>
           <a href="#agents" className="nav-link-hover" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>AI Agents</a>
           <a href="#workflow" className="nav-link-hover" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>Workflow</a>
@@ -276,7 +276,7 @@ export default function LandingPage({ onStartAnalysis }) {
         </nav>
 
         <button 
-          onClick={() => setView('boot')}
+          onClick={onStartAnalysis}
           style={{
             background: 'transparent',
             border: '1px solid #00E676',
@@ -298,7 +298,7 @@ export default function LandingPage({ onStartAnalysis }) {
             e.target.style.boxShadow = '0 0 10px rgba(0,230,118,0.05)';
           }}
         >
-          Analyze Threats
+          Access Console (Login)
         </button>
       </header>
 
@@ -347,7 +347,7 @@ export default function LandingPage({ onStartAnalysis }) {
           {/* Action Trigger Button */}
           <div style={{ marginTop: '10px' }}>
             <button 
-              onClick={() => setView('boot')}
+              onClick={onStartAnalysis}
               style={{
                 background: '#00E676',
                 border: '1px solid #00E676',
@@ -376,7 +376,7 @@ export default function LandingPage({ onStartAnalysis }) {
               }}
             >
               <Activity style={{ width: '16px', height: '16px' }} />
-              ANALYZE THREATS
+              LAUNCH SOC SYSTEM (LOGIN)
             </button>
           </div>
 
